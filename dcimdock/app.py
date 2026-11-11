@@ -226,4 +226,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"selftest ok: dcimdock {__version__}, Qt window built, icon {'ok' if ok else 'MISSING'}")
             app.exit(0 if ok else 1)
         QTimer.singleShot(500, report)
-    return app.exec()
+    rc = app.exec()
+    # tear the window down while the QApplication still exists: leaving it to
+    # Python's garbage collector crashed PySide 6.12 (the AppImage) on exit
+    win.deleteLater()
+    del win
+    app.processEvents()
+    return rc
