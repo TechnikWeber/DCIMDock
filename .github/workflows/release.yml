@@ -17,17 +17,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build AppImage
         run: packaging/appimage/build.sh
-      - name: Start it on Fedora (offscreen)
-        run: |
-          docker run --rm -v "$PWD/dist:/dist:ro" -e QT_QPA_PLATFORM=offscreen \
-            registry.fedoraproject.org/fedora:45 bash -ec '
-              dnf install -y -q libglvnd-glx libglvnd-egl mesa-libGL mesa-libEGL libxkbcommon fontconfig dbus-libs >/dev/null
-              cd /tmp && /dist/dcimdock-*-x86_64.AppImage --appimage-extract-and-run --selftest'
-
+      # upload first, so a failing start test still leaves the file to look at
       - uses: actions/upload-artifact@v4
         with:
           name: appimage
           path: dist/*
+
+      - name: Start it on Fedora (offscreen)
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" -e QT_QPA_PLATFORM=offscreen -e PYTHONFAULTHANDLER=1 \
+            registry.fedoraproject.org/fedora:45 bash -ec '
+              dnf install -y -q libglvnd-glx libglvnd-egl mesa-libGL mesa-libEGL libxkbcommon fontconfig dbus-libs >/dev/null 2>&1
+              cd /tmp && /dist/dcimdock-*-x86_64.AppImage --appimage-extract-and-run --selftest'
 
   rpm:
     runs-on: ubuntu-latest
