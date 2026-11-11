@@ -14,6 +14,7 @@
   <a href="https://github.com/TechnikWeber/DCIMDock/releases/latest"><b>Download</b></a> &nbsp;·&nbsp;
   <a href="#download"><b>Install</b></a> &nbsp;·&nbsp;
   <a href="#before-you-start"><b>Before you start</b></a> &nbsp;·&nbsp;
+  <a href="https://technikweber.github.io/2026/dcimdock-iphone-fotos-unter-linux/"><b>Blog post (German)</b></a> &nbsp;·&nbsp;
   <a href="https://github.com/TechnikWeber/DCIMDock/releases"><b>Releases</b></a>
 </p>
 
