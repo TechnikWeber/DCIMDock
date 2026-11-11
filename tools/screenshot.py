@@ -48,9 +48,10 @@ def paint_photo(path: Path, seed: int):
     img.save(str(path), "JPG", 88)
 
 
+tmp = Path(tempfile.mkdtemp())
+os.environ["XDG_CONFIG_HOME"] = str(tmp / "config")   # default settings, not yours
 app = QApplication(sys.argv[:1])
 app.setDesktopFileName("dcimdock")
-tmp = Path(tempfile.mkdtemp())
 dcim = tmp / "Demo-iPhone" / "DCIM" / "100APPLE"
 dcim.mkdir(parents=True)
 t = time.mktime((2026, 11, 8, 14, 0, 0, 0, 0, -1))

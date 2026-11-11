@@ -81,10 +81,15 @@ class Result:
     seconds: float = 0.0
 
 
+LAYOUTS = ("ym", "ymd", "y", "m", "dcim", "flat")
+
+
 @dataclass
 class Options:
-    layout: str = "date"       # "date": YYYY/YYYY-MM, "dcim": like 100APPLE
+    layout: str = "ym"         # see layout_dir()
     device_folder: str = ""    # subfolder per iPhone, "" for none
+    photo_dir: str = ""        # split photos and videos into these two
+    video_dir: str = ""        # folders; both "" for no split
 
 
 def is_media(name: str) -> str:
@@ -114,9 +119,32 @@ def safe_name(text: str) -> str:
     return text[:80] or "iPhone"
 
 
-def date_dir(t: float) -> str:
+def layout_dir(layout: str, t: float, folder: str) -> str:
+    """ym 2026/2026-11 · ymd 2026/2026-11/2026-11-03 · y 2026 · m 2026-11 ·
+    dcim like on the iPhone (100APPLE) · flat everything in one folder."""
     lt = time.localtime(t)
-    return f"{lt.tm_year:04d}/{lt.tm_year:04d}-{lt.tm_mon:02d}"
+    y, m, d = f"{lt.tm_year:04d}", f"{lt.tm_mon:02d}", f"{lt.tm_mday:02d}"
+    if layout in ("ym", "date"):
+        return f"{y}/{y}-{m}"
+    if layout == "ymd":
+        return f"{y}/{y}-{m}/{y}-{m}-{d}"
+    if layout == "y":
+        return y
+    if layout == "m":
+        return f"{y}-{m}"
+    if layout == "dcim":
+        return folder
+    return ""
+
+
+def group_kind(members) -> str:
+    """A group with a still image is a photo (a Live Photo's MOV stays with it)."""
+    kinds = {is_media(e.name) for e in members}
+    if "image" in kinds:
+        return "image"
+    if "video" in kinds:
+        return "video"
+    return "image"
 
 
 def find_dcim(root: Path) -> Path:
@@ -159,6 +187,10 @@ class Index:
                 self.files = data["files"]
         except (OSError, ValueError):
             pass
+
+    @classmethod
+    def from_file(cls, root: Path, path: Path) -> "Index":
+        return cls(root, path.stem)
 
     def known(self, e: Entry) -> Optional[str]:
         rec = self.files.get(e.rel)
@@ -226,8 +258,11 @@ def make_plan(entries: list[Entry], index: Index, opts: Options) -> Plan:
             m = _SUFFIX.match(got[len(orig):]) if got.startswith(orig) else None
             start = int(m.group(1)) if m else 0
         else:
-            sub = date_dir(min(e.mtime for e in members)) if opts.layout == "date" else folder
-            base = "/".join(p for p in (opts.device_folder, sub) if p)
+            sub = layout_dir(opts.layout, min(e.mtime for e in members), folder)
+            kind_dir = ""
+            if opts.photo_dir and opts.video_dir:
+                kind_dir = opts.video_dir if group_kind(members) == "video" else opts.photo_dir
+            base = "/".join(p for p in (opts.device_folder, kind_dir, sub) if p)
 
         n = start
         while True:
@@ -354,6 +389,41 @@ def run(plan: Plan, dcim: Path, index: Index,
     finally:
         index.save()
         res.seconds = time.monotonic() - t0
+    return res
+
+
+@dataclass
+class Check:
+    ok: int = 0
+    missing: list[str] = field(default_factory=list)
+    changed: list[str] = field(default_factory=list)
+    bytes: int = 0
+
+
+def verify(index: Index, progress: Callable[[int, int], None] = lambda i, n: None,
+           cancel: Callable[[], bool] = lambda: False) -> Check:
+    """Read every saved file again and compare it with the SHA-256 from the copy."""
+    res = Check()
+    items = list(index.files.values())
+    for i, rec in enumerate(items, 1):
+        if cancel():
+            raise Cancelled
+        progress(i, len(items))
+        p = index.root / rec.get("dest", "")
+        try:
+            h = hashlib.sha256()
+            with open(p, "rb") as fh:
+                while chunk := fh.read(CHUNK):
+                    h.update(chunk)
+                    res.bytes += len(chunk)
+        except OSError:
+            res.missing.append(rec.get("dest", ""))
+            continue
+        want = rec.get("sha256", "")
+        if want and h.hexdigest() != want:
+            res.changed.append(rec["dest"])
+        else:
+            res.ok += 1
     return res
 
 

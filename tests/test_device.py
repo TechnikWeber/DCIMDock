@@ -35,6 +35,14 @@ class TestDevice(unittest.TestCase):
                "/dev/sda1 /media/my\\040disk ext4 rw 0 0\n"
         self.assertEqual(device.parse_mounts(text), ["/run/user/1000/dcimdock/ABC", "/media/my disk"])
 
+    def test_ifuse_mounts(self):
+        text = ("ifuse /home/me/iPhone fuse.ifuse rw,nosuid,nodev 0 0\n"
+                "ifuse /run/user/1000/dcimdock/ABC fuse rw 0 0\n"
+                "portal /run/user/1000/doc fuse.portal rw 0 0\n"
+                "/dev/sda1 / ext4 rw 0 0\n")
+        self.assertEqual(device.parse_ifuse_mounts(text),
+                         ["/home/me/iPhone", "/run/user/1000/dcimdock/ABC"])
+
     def test_install_command(self):
         self.assertIn("dnf", device.install_command({"ID": "fedora"}))
         self.assertIn("apt", device.install_command({"ID": "linuxmint", "ID_LIKE": "ubuntu debian"}))

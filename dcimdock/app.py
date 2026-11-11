@@ -78,10 +78,13 @@ def cli(args) -> int:
 
     try:
         root = Path(args.dest).expanduser().resolve() if args.dest else _default_dest()
+        if args.full:
+            root = root / f"{tr('Full copy')} {time.strftime('%Y-%m-%d %H-%M')}"
         print(tr("Reading the photo list…"))
         entries = sync.scan(dcim)
         index = sync.Index(root, dev.udid)
-        opts = sync.Options(args.layout, "" if args.no_device_folder else sync.safe_name(dev.label))
+        split = (tr("Photos"), tr("Videos")) if args.split else ("", "")
+        opts = sync.Options(args.layout, "" if args.no_device_folder else sync.safe_name(dev.label), *split)
         plan = sync.make_plan(entries, index, opts)
         known = plan.known + len(plan.adopted)
         if not plan.tasks:
@@ -139,6 +142,27 @@ def cli(args) -> int:
             device.unmount(mount)
 
 
+def verify_cli(args) -> int:
+    from . import sync
+    from .i18n import num, size, tr
+
+    root = Path(args.dest).expanduser().resolve() if args.dest else _default_dest()
+    files = sorted((root / sync.INDEX_DIR).glob("*.json"))
+    if not files:
+        print(tr("There is no backup in {folder} yet.", folder=root), file=sys.stderr)
+        return 1
+    bad = 0
+    for f in files:
+        res = sync.verify(sync.Index.from_file(root, f))
+        print(tr("{n} files are intact ({size}).", n=num(res.ok), size=size(res.bytes)))
+        for x in res.missing:
+            print(f"  {tr('Missing:')} {x}")
+        for x in res.changed:
+            print(f"  {tr('Changed or damaged:')} {x}")
+        bad += len(res.missing) + len(res.changed)
+    return 1 if bad else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="dcimdock",
@@ -147,8 +171,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"dcimdock {__version__}")
     parser.add_argument("--cli", action="store_true", help="copy in the terminal, no window")
     parser.add_argument("--dest", help="backup folder (default: ~/Pictures/iPhone)")
-    parser.add_argument("--layout", choices=("date", "dcim"), default="date",
-                        help="date: YYYY/YYYY-MM folders (default); dcim: like on the iPhone")
+    parser.add_argument("--layout", choices=("ym", "ymd", "m", "y", "dcim", "flat"), default="ym",
+                        help="ym: 2026/2026-11 (default), ymd: 2026/2026-11/2026-11-03, m: 2026-11, "
+                             "y: 2026, dcim: like on the iPhone, flat: one folder")
+    parser.add_argument("--split", action="store_true", help="photos and videos into separate folders")
+    parser.add_argument("--full", action="store_true",
+                        help="copy everything into a new folder, without comparing with earlier backups")
+    parser.add_argument("--verify", action="store_true",
+                        help="read the backup in --dest again and compare it with the checksums")
     parser.add_argument("--no-device-folder", action="store_true",
                         help="no subfolder named after the iPhone")
     parser.add_argument("--dry-run", action="store_true", help="only show what would be copied")
@@ -156,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--selftest", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
+    if args.verify:
+        return verify_cli(args)
     if args.cli:
         return cli(args)
 

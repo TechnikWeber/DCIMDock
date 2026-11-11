@@ -29,10 +29,11 @@ class Fake(unittest.TestCase):
         os.utime(p, (mtime, mtime))
         return p
 
-    def sync(self, layout="date", folder="Phone"):
+    def sync(self, layout="ym", folder="Phone", split=False):
         entries = sync.scan(sync.find_dcim(self.phone))
         index = sync.Index(self.dest, "UDID")
-        plan = sync.make_plan(entries, index, sync.Options(layout, folder))
+        kinds = ("Photos", "Videos") if split else ("", "")
+        plan = sync.make_plan(entries, index, sync.Options(layout, folder, *kinds))
         res = sync.run(plan, self.dcim, index)
         return plan, res
 
@@ -167,6 +168,45 @@ class TestSync(Fake):
         entries = sync.scan(self.dcim)
         a, b, k = sync.saved_range(entries, sync.Index(self.dest, "UDID"))
         self.assertEqual((a, b, k), (OCT_END, NOV, 2))
+
+
+    def test_split_photos_videos_live_photo_stays_with_photo(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"still")
+        self.put("100APPLE/IMG_0001.MOV", b"live part")
+        self.put("100APPLE/IMG_0002.MOV", b"a real video")
+        self.put("100APPLE/IMG_0003.PNG", b"screenshot")
+        self.sync(split=True)
+        self.assertEqual(self.files(), [
+            "Phone/Photos/2026/2026-11/IMG_0001.HEIC", "Phone/Photos/2026/2026-11/IMG_0001.MOV",
+            "Phone/Photos/2026/2026-11/IMG_0003.PNG", "Phone/Videos/2026/2026-11/IMG_0002.MOV"])
+
+    def test_layouts(self):
+        t = NOV
+        self.assertEqual(sync.layout_dir("ym", t, "100APPLE"), "2026/2026-11")
+        self.assertEqual(sync.layout_dir("ymd", t, "100APPLE"), "2026/2026-11/2026-11-03")
+        self.assertEqual(sync.layout_dir("m", t, "100APPLE"), "2026-11")
+        self.assertEqual(sync.layout_dir("y", t, "100APPLE"), "2026")
+        self.assertEqual(sync.layout_dir("dcim", t, "100APPLE"), "100APPLE")
+        self.assertEqual(sync.layout_dir("flat", t, "100APPLE"), "")
+
+    def test_flat_layout(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"x")
+        self.put("101APPLE/IMG_0002.HEIC", b"y")
+        self.sync(layout="flat", folder="")
+        self.assertEqual(self.files(), ["IMG_0001.HEIC", "IMG_0002.HEIC"])
+
+    def test_verify_finds_missing_and_damaged(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"one")
+        self.put("100APPLE/IMG_0002.HEIC", b"two")
+        self.put("100APPLE/IMG_0003.HEIC", b"three")
+        self.sync()
+        (self.dest / "Phone/2026/2026-11/IMG_0001.HEIC").unlink()
+        (self.dest / "Phone/2026/2026-11/IMG_0002.HEIC").write_bytes(b"TWO")
+        idx = sync.Index.from_file(self.dest, self.dest / ".dcimdock/UDID.json")
+        res = sync.verify(idx)
+        self.assertEqual(res.ok, 1)
+        self.assertEqual(res.missing, ["Phone/2026/2026-11/IMG_0001.HEIC"])
+        self.assertEqual(res.changed, ["Phone/2026/2026-11/IMG_0002.HEIC"])
 
 
 class TestNames(unittest.TestCase):

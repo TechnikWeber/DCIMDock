@@ -6,11 +6,11 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, QSize, QStandardPaths, Qt, QThread, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QImageReader, QPixmap
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QImageReader, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout,
-    QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
-    QTextBrowser, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout,
+    QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QSizePolicy, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import device, sync
@@ -18,6 +18,14 @@ from .i18n import date, duration, num, size, tr
 from .icon import app_icon
 
 PREVIEW = QSize(360, 240)
+LAYOUT_LABELS = [
+    ("ym", "Year / month (2026/2026-11)"),
+    ("ymd", "Year / month / day (2026/2026-11/2026-11-03)"),
+    ("m", "Month (2026-11)"),
+    ("y", "Year (2026)"),
+    ("dcim", "Like on the iPhone (100APPLE …)"),
+    ("flat", "All in one folder"),
+]
 
 
 class Call(QThread):
@@ -32,6 +40,23 @@ class Call(QThread):
             self.res = self.fn(*self.args)
         except Exception as exc:  # noqa: BLE001 – shown to the user
             self.err = exc
+
+
+class DiagDialog(QDialog):
+    def __init__(self, parent, text: str):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Diagnosis"))
+        self.resize(640, 420)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(tr("Paste this into a bug report:")))
+        box = QPlainTextEdit(text)
+        box.setReadOnly(True)
+        lay.addWidget(box)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        copy = buttons.addButton(tr("Copy"), QDialogButtonBox.ActionRole)
+        copy.clicked.connect(lambda: QGuiApplication.clipboard().setText(text))
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
 
 
 class SyncThread(QThread):
@@ -55,6 +80,24 @@ class SyncThread(QThread):
         res = sync.run(self.plan, self.dcim, self.index, self._progress,
                        lambda t, p: self.file_done.emit(str(p)), self.stop.is_set)
         self.result.emit(res)
+
+
+class VerifyThread(QThread):
+    progress = Signal(int, int)
+
+    def __init__(self, parent, root, files):
+        super().__init__(parent)
+        self.root, self.files = root, files
+        self.res = sync.Check()
+
+    def run(self):
+        for f in self.files:
+            part = sync.verify(sync.Index.from_file(self.root, f),
+                               lambda i, n: (i % 25 == 0 or i == n) and self.progress.emit(i, n))
+            self.res.ok += part.ok
+            self.res.bytes += part.bytes
+            self.res.missing += part.missing
+            self.res.changed += part.changed
 
 
 class _Decoded(QObject):
@@ -123,6 +166,7 @@ class MainWindow(QMainWindow):
         self._connecting = False
         self._retry_at = 0.0
         self._quit_after_stop = False
+        self._copy_index = None
         self._gone_during_copy = False
 
         self._build()
@@ -188,33 +232,40 @@ class MainWindow(QMainWindow):
         lay.addLayout(dest_row)
 
         sort_row = QHBoxLayout()
-        sort_row.addWidget(QLabel(tr("Sort") + ":"))
-        self.by_date = QRadioButton(tr("By date (2026/2026-11)"))
-        self.by_dcim = QRadioButton(tr("Like on the iPhone (100APPLE …)"))
-        grp = QButtonGroup(self)
-        grp.addButton(self.by_date)
-        grp.addButton(self.by_dcim)
-        sort_row.addWidget(self.by_date)
-        sort_row.addWidget(self.by_dcim)
-        sort_row.addStretch(1)
+        sort_row.addWidget(QLabel(tr("Folders") + ":"))
+        self.layout_box = QComboBox()
+        for key, label in LAYOUT_LABELS:
+            self.layout_box.addItem(tr(label), key)
+        sort_row.addWidget(self.layout_box, 1)
         lay.addLayout(sort_row)
 
         opt_row = QHBoxLayout()
         self.per_device = QCheckBox(tr("Own folder per iPhone"))
+        self.split = QCheckBox(tr("Photos and videos apart"))
         self.preview_box = QCheckBox(tr("Preview"))
         opt_row.addWidget(self.per_device)
+        opt_row.addWidget(self.split)
         opt_row.addWidget(self.preview_box)
         opt_row.addStretch(1)
         lay.addLayout(opt_row)
+        self.example = QLabel()
+        self.example.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.example.setStyleSheet("color: palette(placeholder-text);")
+        lay.addWidget(self.example)
 
         s = self.settings
         self.dest = s.value("dest", default_dest())
-        (self.by_dcim if s.value("layout", "date") == "dcim" else self.by_date).setChecked(True)
+        layout = s.value("layout", "ym")
+        layout = "ym" if layout == "date" else layout
+        self.layout_box.setCurrentIndex(max(0, self.layout_box.findData(layout)))
         self.per_device.setChecked(s.value("per_device", True, type=bool))
+        self.split.setChecked(s.value("split", False, type=bool))
         self.preview_box.setChecked(s.value("preview", True, type=bool))
         self._show_dest()
-        self.by_date.toggled.connect(self._options_changed)
+        self._show_example()
+        self.layout_box.currentIndexChanged.connect(self._options_changed)
         self.per_device.toggled.connect(self._options_changed)
+        self.split.toggled.connect(self._options_changed)
         self.preview_box.toggled.connect(self._preview_toggled)
 
         self.summary = QLabel()
@@ -247,6 +298,21 @@ class MainWindow(QMainWindow):
         btns = QHBoxLayout()
         self.open_btn = QPushButton(tr("Open folder"))
         self.open_btn.clicked.connect(self.open_dest)
+        self.more_btn = QToolButton()
+        self.more_btn.setText(tr("More"))
+        self.more_btn.setPopupMode(QToolButton.InstantPopup)
+        self.more_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        menu = QMenu(self.more_btn)
+        self.act_full = menu.addAction(tr("Copy everything again (new folder)…"), self.full_copy)
+        self.act_verify = menu.addAction(tr("Check the backup…"), self.verify)
+        menu.addSeparator()
+        fix = menu.addMenu(tr("Troubleshooting"))
+        self.act_release = fix.addAction(tr("Release stuck iPhone folders"), self.fix_mounts)
+        self.act_repair = fix.addAction(tr("Pair again (ask for Trust again)"), self.fix_pairing)
+        self.act_usbmuxd = fix.addAction(tr("Restart the iPhone service (usbmuxd)"), self.fix_usbmuxd)
+        fix.addSeparator()
+        fix.addAction(tr("Diagnosis…"), self.show_diagnosis)
+        self.more_btn.setMenu(menu)
         self.retry_btn = QPushButton(tr("Check again"))
         self.retry_btn.clicked.connect(self.start)
         self.retry_btn.hide()
@@ -254,6 +320,7 @@ class MainWindow(QMainWindow):
         self.go_btn.setDefault(True)
         self.go_btn.clicked.connect(self.go_or_stop)
         btns.addWidget(self.open_btn)
+        btns.addWidget(self.more_btn)
         btns.addStretch(1)
         btns.addWidget(self.retry_btn)
         btns.addWidget(self.go_btn)
@@ -276,11 +343,14 @@ class MainWindow(QMainWindow):
     def _set_state(self, state: str, text: str = ""):
         self.state = state
         self.status.setText(text)
-        busy = state in ("connecting", "scanning", "copying")
+        busy = state in ("connecting", "scanning", "copying", "fixing")
         self.go_btn.setEnabled(state == "copying" or (state == "ready" and bool(self.plan and self.plan.tasks)))
         self.go_btn.setText(tr("Stop") if state == "copying" else tr("Back up"))
-        for w in (self.dest_btn, self.by_date, self.by_dcim, self.per_device):
+        for w in (self.dest_btn, self.layout_box, self.per_device, self.split, self.more_btn):
             w.setEnabled(not busy)
+        self.act_full.setEnabled(state == "ready" and bool(self.entries))
+        has_dev = bool(self.dev) and not self.source
+        self.act_repair.setEnabled(has_dev)
         self.retry_btn.setVisible(state in ("missing", "error"))
 
     def _show_dest(self):
@@ -289,9 +359,16 @@ class MainWindow(QMainWindow):
 
     def _options(self) -> sync.Options:
         folder = ""
-        if self.per_device.isChecked() and self.dev:
-            folder = sync.safe_name(self.dev.label)
-        return sync.Options("dcim" if self.by_dcim.isChecked() else "date", folder)
+        if self.per_device.isChecked():
+            folder = sync.safe_name(self.dev.label) if self.dev else "iPhone"
+        photos, videos = (tr("Photos"), tr("Videos")) if self.split.isChecked() else ("", "")
+        return sync.Options(self.layout_box.currentData(), folder, photos, videos)
+
+    def _show_example(self):
+        o = self._options()
+        t = time.mktime((2026, 11, 3, 14, 0, 0, 0, 0, -1))
+        parts = [o.device_folder, o.photo_dir, sync.layout_dir(o.layout, t, "100APPLE"), "IMG_0001.HEIC"]
+        self.example.setText(tr("Example") + ": " + "/".join(p for p in parts if p))
 
     # ------------------------------------------------------------ start / polling
     def start(self):
@@ -303,12 +380,18 @@ class MainWindow(QMainWindow):
             self.dcim = sync.find_dcim(self.source)
             self._scan()
             return
+        fixed = device.broken_mounts()
+        if fixed:
+            device.release_mounts()
         miss = device.missing()
         if miss:
             self._set_state("missing", tr("Missing programs: {tools}.\nInstall them with:\n\n{cmd}",
                                          tools=", ".join(miss), cmd=device.install_command()))
             return
-        self._set_state("none", tr("Connect your iPhone with a USB cable."))
+        text = tr("Connect your iPhone with a USB cable.")
+        if fixed:
+            text += "\n" + tr("Released a stuck iPhone folder: {where}", where=", ".join(fixed))
+        self._set_state("none", text)
         self.poll_timer.start()
         self.poll()
 
@@ -327,7 +410,7 @@ class MainWindow(QMainWindow):
         if self.dev is None and ids:
             self.dev = device.Device(ids[0])
             self._connect()
-        elif self.dev and self.state in ("locked", "trust", "error") and time.monotonic() >= self._retry_at:
+        elif self.dev and self.state in ("locked", "trust", "nophotos", "error") and time.monotonic() >= self._retry_at:
             self._connect()
 
     def _device_gone(self):
@@ -357,6 +440,8 @@ class MainWindow(QMainWindow):
             return dev, state, msg, None
         try:
             return dev, "ready", "", device.mount(udid)
+        except device.NoPhotos as exc:
+            return dev, "nophotos", str(exc), None
         except device.DeviceError as exc:
             return dev, "mount", str(exc), None
 
@@ -381,6 +466,8 @@ class MainWindow(QMainWindow):
             self._set_state("trust", tr("Unlock your iPhone and tap “Trust”, then enter your passcode."))
         elif state == "denied":
             self._set_state("denied", tr("You tapped “Don’t Trust”. Unplug the iPhone and plug it in again."))
+        elif state == "nophotos":
+            self._set_state("nophotos", tr("The photos are not visible yet. Unlock your iPhone. (If it has no photos at all, this stays.)"))
         elif state == "gone":
             self._device_gone()
         elif state == "mount":
@@ -428,6 +515,7 @@ class MainWindow(QMainWindow):
             self._set_state("error", str(err))
             return
         self.index, self.plan = res
+        self._show_example()
         p = self.plan
         known = p.known + len(p.adopted)
         if not self.entries:
@@ -452,8 +540,10 @@ class MainWindow(QMainWindow):
             self.go_btn.setEnabled(False)
 
     def _options_changed(self, *_):
-        self.settings.setValue("layout", "dcim" if self.by_dcim.isChecked() else "date")
+        self.settings.setValue("layout", self.layout_box.currentData())
         self.settings.setValue("per_device", self.per_device.isChecked())
+        self.settings.setValue("split", self.split.isChecked())
+        self._show_example()
         self._replan()
 
     def choose_dest(self):
@@ -477,17 +567,21 @@ class MainWindow(QMainWindow):
             return
         if not self.plan or not self.plan.tasks:
             return
-        Path(self.dest).mkdir(parents=True, exist_ok=True)
+        self._start_copy(self.plan, self.index)
+
+    def _start_copy(self, plan, index):
+        index.root.mkdir(parents=True, exist_ok=True)
         self._gone_during_copy = False
-        self.total = self.plan.bytes
-        self.count = len(self.plan.tasks)
+        self._copy_plan, self._copy_index = plan, index
+        self.total = plan.bytes
+        self.count = len(plan.tasks)
         self.t0 = time.monotonic()
         self.speed = 0.0
         self._speed_mark = (self.t0, 0)
         self.bar.setValue(0)
         self.bar.setFormat("0 %")
         self.detail.setText(tr("Preparing…"))
-        self.worker = SyncThread(self, self.plan, self.dcim, self.index)
+        self.worker = SyncThread(self, plan, self.dcim, index)
         self.worker.progress.connect(self._progress)
         self.worker.file_done.connect(self._file_done)
         self.worker.result.connect(self._finished)
@@ -506,7 +600,7 @@ class MainWindow(QMainWindow):
             inst = (done - b_mark) / (now - t_mark)
             self.speed = inst if self.speed == 0 else 0.7 * self.speed + 0.3 * inst
             self._speed_mark = (now, done)
-        task = self.plan.tasks[min(i, self.count) - 1]
+        task = self._copy_plan.tasks[min(i, self.count) - 1]
         text = tr("File {i} of {n} · {name}", i=num(i), n=num(self.count), name=task.entry.name)
         if self.speed > 0:
             left = (self.total - done) / self.speed
@@ -547,8 +641,8 @@ class MainWindow(QMainWindow):
             lines = "\n".join(f"  {rel}: {why}" for rel, why in res.failed[:8])
             more = "\n  …" if len(res.failed) > 8 else ""
             parts.append(tr("{n} files could not be read:", n=num(len(res.failed))) + "\n" + lines + more)
-        if self.entries and self.index:
-            a, b, k = sync.saved_range(self.entries, self.index)
+        if self.entries and self._copy_index:
+            a, b, k = sync.saved_range(self.entries, self._copy_index)
             if a is not None:
                 parts.append(tr("From this iPhone, {k} files taken between {a} and {b} are safe on this computer.",
                                 k=num(k), a=date(a), b=date(b)))
@@ -561,6 +655,105 @@ class MainWindow(QMainWindow):
         box.exec()
         if box.clickedButton() is open_btn:
             self.open_dest()
+
+    # ------------------------------------------------------------ more menu
+    def full_copy(self):
+        if self.worker or self.state == "fixing":
+            return
+        if not self.entries or not self.dev:
+            return
+        stamp = time.strftime("%Y-%m-%d %H-%M")
+        root = Path(self.dest) / f"{tr('Full copy')} {stamp}"
+        index = sync.Index(root, self.dev.udid)
+        plan = sync.make_plan(self.entries, index, self._options())
+        ok, free = sync.free_space_ok(Path(self.dest), plan.bytes)
+        text = tr("Copies all {n} files ({size}) from the iPhone into a new folder, without comparing with earlier backups:\n\n{folder}\n\nThe normal backup is not touched.",
+                  n=num(len(plan.tasks)), size=size(plan.bytes), folder=root)
+        if not ok:
+            QMessageBox.warning(self, tr("Copy everything again"), text + "\n\n" + tr(
+                "Only {free} free in the backup folder, {need} needed.",
+                free=size(free), need=size(plan.bytes + sync.SPACE_RESERVE)))
+            return
+        ask = QMessageBox(QMessageBox.Question, tr("Copy everything again"), text, QMessageBox.NoButton, self)
+        go = ask.addButton(tr("Copy everything"), QMessageBox.AcceptRole)
+        ask.addButton(tr("Cancel"), QMessageBox.RejectRole)
+        ask.exec()
+        if ask.clickedButton() is go:
+            self._start_copy(plan, index)
+
+    def verify(self):
+        if self.worker or self.state == "fixing":
+            return
+        root = Path(self.dest)
+        files = sorted((root / sync.INDEX_DIR).glob("*.json"))
+        if not files:
+            QMessageBox.information(self, tr("Check the backup"), tr("There is no backup in {folder} yet.", folder=root))
+            return
+        self._set_state("fixing", tr("Reading every saved file again and comparing it with its checksum…"))
+        self.go_btn.setEnabled(False)
+        th = VerifyThread(self, root, files)
+        th.progress.connect(lambda i, n: (self.bar.setValue(int(i * 1000 / max(n, 1))),
+                                          self.bar.setFormat(f"{i * 100 // max(n, 1)} %"),
+                                          self.detail.setText(tr("File {i} of {n}", i=num(i), n=num(n)))))
+
+        def done():
+            res = th.res
+            th.deleteLater()
+            self.detail.setText(" ")
+            if self.entries is not None:
+                self._replan()
+            else:
+                self._set_state("none", tr("Connect your iPhone with a USB cable."))
+            lines = [tr("{n} files are intact ({size}).", n=num(res.ok), size=size(res.bytes))]
+            for title, items in ((tr("Missing:"), res.missing), (tr("Changed or damaged:"), res.changed)):
+                if items:
+                    lines.append(title + "\n" + "\n".join("  " + x for x in items[:15]) + ("\n  …" if len(items) > 15 else ""))
+            if res.missing or res.changed:
+                lines.append(tr("Missing files are copied again on the next backup, as long as they are still on the iPhone."))
+            QMessageBox(QMessageBox.Warning if (res.missing or res.changed) else QMessageBox.Information,
+                        tr("Check the backup"), "\n\n".join(lines), QMessageBox.Ok, self).exec()
+        th.finished.connect(done)
+        th.start()
+
+    def _fix(self, fn, after, *args):
+        if self.worker or self.state == "fixing":
+            return
+        self.poll_timer.stop()
+        if self.mount:
+            device.unmount(self.mount, lazy=True)
+        self.dev = self.mount = self.dcim = self.entries = self.plan = None
+        self.title.setText("DCIMDock")
+        self.summary.clear()
+        self._set_state("fixing", tr("Working…"))
+        self._call(fn, lambda res, err: (after(res, err), self.start()), *args)
+
+    def fix_mounts(self):
+        def after(res, err):
+            QMessageBox.information(self, tr("Troubleshooting"), tr("Released: {where}", where=", ".join(res)) if res
+                                    else tr("No iPhone folder was mounted."))
+        self._fix(device.release_mounts, after)
+
+    def fix_pairing(self):
+        if not self.dev:
+            return
+        udid = self.dev.udid
+
+        def after(res, err):
+            state = res[0] if res else "error"
+            QMessageBox.information(self, tr("Troubleshooting"), tr("Paired again.") if state == "ready" else
+                                    tr("Unlock your iPhone and tap “Trust”, then enter your passcode."))
+        self._fix(device.repair_pairing, after, udid)
+
+    def fix_usbmuxd(self):
+        def after(res, err):
+            ok, msg = res if res else (False, str(err))
+            QMessageBox.information(self, tr("Troubleshooting"), tr("The iPhone service was restarted. Unplug the iPhone and plug it in again.")
+                                    if ok else tr("Could not restart the service: {msg}", msg=_short(msg) or "-"))
+        self._fix(device.restart_usbmuxd, after)
+
+    def show_diagnosis(self):
+        self.setCursor(Qt.WaitCursor)
+        self._call(device.diagnose, lambda res, err: (self.unsetCursor(), DiagDialog(self, res or str(err)).exec()))
 
     # ------------------------------------------------------------ preview
     def _preview_toggled(self, on: bool):

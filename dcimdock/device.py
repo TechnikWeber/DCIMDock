@@ -22,6 +22,10 @@ class DeviceError(Exception):
     pass
 
 
+class NoPhotos(DeviceError):
+    """Mounted, but no DCIM folder: locked, not trusted yet, or no photos at all."""
+
+
 @dataclass
 class Device:
     udid: str
@@ -192,6 +196,97 @@ def unmount(mp: Path, lazy: bool = False):
         pass
 
 
+def parse_ifuse_mounts(text: str) -> list[str]:
+    """Mount points of ifuse, also the ones made by hand (e.g. ~/iPhone)."""
+    out = []
+    for line in text.splitlines():
+        f = line.split()
+        if len(f) > 2 and (f[2] == "fuse.ifuse" or (f[0] == "ifuse" and f[2].startswith("fuse"))):
+            out.append(_unescape(f[1]))
+    return out
+
+
+def ifuse_mounts() -> list[str]:
+    try:
+        return parse_ifuse_mounts(Path("/proc/self/mounts").read_text())
+    except OSError:
+        return []
+
+
+def broken_mounts() -> list[str]:
+    """ifuse mounts whose iPhone is gone: 'Transport endpoint is not connected'."""
+    bad = []
+    for mp in ifuse_mounts():
+        try:
+            os.listdir(mp)
+        except OSError:
+            bad.append(mp)
+    return bad
+
+
+def release_mounts() -> list[str]:
+    """Unmount every ifuse mount of this user (ours and hand-made ones)."""
+    done = []
+    tool = fusermount()
+    for mp in ifuse_mounts():
+        if tool:
+            _run([tool, "-u", "-z", mp], timeout=15)
+        if mp not in ifuse_mounts():
+            done.append(mp)
+    base = runtime_dir()
+    if base.is_dir():
+        for mp in base.iterdir():
+            try:
+                mp.rmdir()
+            except OSError:
+                pass
+    return done
+
+
+def repair_pairing(udid: str) -> tuple[str, str]:
+    """Forget the trust on this computer and ask the iPhone again."""
+    _run(["idevicepair", "-u", udid, "unpair"], timeout=15)
+    rc, out = _run(["idevicepair", "-u", udid, "pair"], timeout=15)
+    return classify_pair(rc, out), out.strip()
+
+
+def restart_usbmuxd() -> tuple[bool, str]:
+    """Restart the USB service for iPhones (asks for the password via polkit)."""
+    if not shutil.which("pkexec") or not shutil.which("systemctl"):
+        return False, "pkexec/systemctl not found"
+    rc, out = _run(["pkexec", "systemctl", "restart", "usbmuxd.service"], timeout=120)
+    return rc == 0, out.strip()
+
+
+def diagnose() -> str:
+    """Everything useful for a bug report, as plain text."""
+    from . import __version__
+    lines = [f"DCIMDock {__version__}"]
+    rel = os_release()
+    lines.append(f"System: {rel.get('PRETTY_NAME', '?')}")
+    lines.append(f"Desktop: {os.environ.get('XDG_CURRENT_DESKTOP', '?')}")
+    lines.append(f"Missing: {', '.join(missing()) or 'nothing'}")
+    for args in (["ifuse", "--version"], ["idevice_id", "--version"]):
+        lines.append(f"{args[0]}: {_run(args, 5)[1].strip().splitlines()[0] if shutil.which(args[0]) else '-'}")
+    if shutil.which("systemctl"):
+        lines.append(f"usbmuxd service: {_run(['systemctl', 'is-active', 'usbmuxd.service'], 5)[1].strip()}")
+    if shutil.which("lsusb"):
+        apple = [ln for ln in _run(["lsusb"], 5)[1].splitlines() if "05ac:" in ln.lower()]
+        lines.append("USB (Apple): " + ("; ".join(apple) or "none"))
+    ids = list_devices()
+    lines.append(f"idevice_id -l: {', '.join(ids) or 'no device'}")
+    for udid in ids:
+        d = info(udid)
+        lines.append(f"  {udid}: {d.name or '?'} {d.product} iOS {d.ios or '?'}")
+        rc, out = _run(["idevicepair", "-u", udid, "validate"], 10)
+        lines.append(f"  pairing: {' '.join(out.split())}")
+    mounts = ifuse_mounts()
+    broken = broken_mounts()
+    lines.append("ifuse mounts: " + (", ".join(
+        mp + (" (BROKEN)" if mp in broken else "") for mp in mounts) or "none"))
+    return "\n".join(lines)
+
+
 def mount(udid: str) -> Path:
     """Mount the media partition read-only; returns the mount point."""
     mp = runtime_dir() / udid
@@ -209,6 +304,11 @@ def mount(udid: str) -> Path:
         except OSError:
             pass
         raise DeviceError(out.strip() or f"ifuse exit code {rc}")
+    if not (mp / "DCIM").is_dir():
+        # mounted while the iPhone was locked or before Trust: an empty
+        # pseudo folder. Do not keep it around.
+        unmount(mp, lazy=True)
+        raise NoPhotos("DCIM not visible")
     return mp
 
 

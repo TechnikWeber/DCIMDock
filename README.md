@@ -45,8 +45,11 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
   run continues where it stopped. A SHA-256 of each file goes into the index.
 * Keeps what belongs together in one folder with the same suffix: Live Photo
   (`.HEIC` + `.MOV`), the edited version (`IMG_E…`) and the edit file (`.AAE`).
-* Sorts by date (`2026/2026-11`) or like on the iPhone (`100APPLE`), with a
-  folder per iPhone if you like.
+* Folders as you like: year/month (`2026/2026-11`), year/month/day, month,
+  year, like on the iPhone (`100APPLE`) or all in one folder. Optionally a
+  folder per iPhone and **photos and videos apart** (`Photos/…`, `Videos/…`;
+  a Live Photo's video stays with its photo). The window shows an example
+  path.
 * Checks the free space before it starts.
 * Progress bar with speed and time left. The **preview** of the photo just
   copied is decoded at reduced size in its own thread, at most about twice a
@@ -56,7 +59,25 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
 * A **Before you start** page on first launch covers iCloud Photos, HEIC vs
   JPEG and the iPhone settings (see below). Tick *Don't show this again* to
   hide it; the button in the window brings it back.
-* Terminal mode for scripts: `dcimdock --cli [--dest DIR] [--layout date|dcim] [--dry-run]`.
+* **Copy everything again:** all files into a new folder
+  (`Full copy 2026-11-11 21-30`), without comparing with earlier backups.
+  The normal backup is not touched.
+* **Check the backup:** reads every saved file again and compares it with
+  the SHA-256 taken while copying. Worth doing before you delete photos on
+  the iPhone. Works without the iPhone connected.
+* **Troubleshooting** menu:
+  * *Release stuck iPhone folders*: unmounts every ifuse mount, also
+    hand-made ones like `~/iPhone`. A mount whose iPhone is gone
+    (*Transport endpoint is not connected*) is released automatically on
+    start.
+  * *Pair again*: forgets the trust on this computer and asks the iPhone again.
+  * *Restart the iPhone service* (`usbmuxd`, asks for your password).
+  * *Diagnosis*: versions, device, pairing and mounts as text for a bug report.
+* If the iPhone was mounted while locked (an empty pseudo folder without
+  `DCIM`), DCIMDock unmounts it and asks you to unlock.
+* Terminal mode for scripts:
+  `dcimdock --cli [--dest DIR] [--layout ym|ymd|m|y|dcim|flat] [--split] [--full] [--dry-run]`,
+  and `dcimdock --verify --dest DIR` to check a backup.
 * English or German, following the system language.
 
 The speed limit is the iPhone's USB connection (roughly 20–35 MB/s on
