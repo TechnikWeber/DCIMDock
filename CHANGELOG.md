@@ -10,6 +10,10 @@ First release.
 * Live Photo, edited version and `.AAE` stay together.
 * Folders by year/month, year/month/day, month, year, like on the iPhone or
   all in one; optional folder per iPhone; optional photos and videos apart.
+* Folders by the capture date from EXIF (JPEG, HEIC, PNG, DNG) or the movie
+  header (MOV, MP4), switchable to the file date.
+* Screenshots into their own folder, recognised by the mark iOS writes.
+* A list to pick the iPhone when several are connected.
 * Copy everything again into a new folder; check the backup against the
   checksums.
 * Troubleshooting: release stuck ifuse mounts (also automatically on start),

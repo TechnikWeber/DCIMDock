@@ -100,6 +100,10 @@ class VerifyThread(QThread):
             self.res.changed += part.changed
 
 
+class _MetaProgress(QObject):
+    step = Signal(int, int)
+
+
 class _Decoded(QObject):
     ready = Signal(str, object)  # path, QImage or None
 
@@ -118,7 +122,10 @@ class Decode(QRunnable):
         if s.isValid():
             r.setScaledSize(s.scaled(PREVIEW, Qt.KeepAspectRatio))
         img = r.read()
-        self.sink.ready.emit(self.path, None if img.isNull() else img)
+        try:
+            self.sink.ready.emit(self.path, None if img.isNull() else img)
+        except RuntimeError:   # window closed while decoding
+            pass
 
 
 class IntroDialog(QDialog):
@@ -167,6 +174,13 @@ class MainWindow(QMainWindow):
         self._retry_at = 0.0
         self._quit_after_stop = False
         self._copy_index = None
+        self.devices: dict[str, str] = {}     # udid -> name, all connected iPhones
+        self._wanted = ""                     # udid picked in the device box
+        self._naming: set[str] = set()
+        self._meta_cache: dict = {}
+        self._plan_gen = 0
+        self.meta_sig = _MetaProgress()
+        self.meta_sig.step.connect(self._meta_step)
         self._gone_during_copy = False
 
         self._build()
@@ -207,7 +221,15 @@ class MainWindow(QMainWindow):
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        col.addWidget(self.title)
+        title_row = QHBoxLayout()
+        title_row.addWidget(self.title)
+        self.device_box = QComboBox()
+        self.device_box.setToolTip(tr("Several iPhones are connected. Pick the one to back up."))
+        self.device_box.hide()
+        self.device_box.activated.connect(self._device_chosen)
+        title_row.addWidget(self.device_box)
+        title_row.addStretch(1)
+        col.addLayout(title_row)
         col.addWidget(self.status)
         head.addLayout(col, 1)
         self.info_btn = QPushButton(tr("Before you start"))
@@ -248,6 +270,14 @@ class MainWindow(QMainWindow):
         opt_row.addWidget(self.preview_box)
         opt_row.addStretch(1)
         lay.addLayout(opt_row)
+        opt_row2 = QHBoxLayout()
+        self.capture_box = QCheckBox(tr("Sort by the date the photo was taken (EXIF)"))
+        self.capture_box.setToolTip(tr("Reads the capture date from the photo or video. Off: the file date is used, which for saved or imported pictures is the day they were saved."))
+        self.shots_box = QCheckBox(tr("Screenshots apart"))
+        opt_row2.addWidget(self.capture_box)
+        opt_row2.addWidget(self.shots_box)
+        opt_row2.addStretch(1)
+        lay.addLayout(opt_row2)
         self.example = QLabel()
         self.example.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.example.setStyleSheet("color: palette(placeholder-text);")
@@ -260,12 +290,16 @@ class MainWindow(QMainWindow):
         self.layout_box.setCurrentIndex(max(0, self.layout_box.findData(layout)))
         self.per_device.setChecked(s.value("per_device", True, type=bool))
         self.split.setChecked(s.value("split", False, type=bool))
+        self.capture_box.setChecked(s.value("capture_date", True, type=bool))
+        self.shots_box.setChecked(s.value("screenshots", False, type=bool))
         self.preview_box.setChecked(s.value("preview", True, type=bool))
         self._show_dest()
         self._show_example()
         self.layout_box.currentIndexChanged.connect(self._options_changed)
         self.per_device.toggled.connect(self._options_changed)
         self.split.toggled.connect(self._options_changed)
+        self.capture_box.toggled.connect(self._options_changed)
+        self.shots_box.toggled.connect(self._options_changed)
         self.preview_box.toggled.connect(self._preview_toggled)
 
         self.summary = QLabel()
@@ -346,9 +380,12 @@ class MainWindow(QMainWindow):
         busy = state in ("connecting", "scanning", "copying", "fixing")
         self.go_btn.setEnabled(state == "copying" or (state == "ready" and bool(self.plan and self.plan.tasks)))
         self.go_btn.setText(tr("Stop") if state == "copying" else tr("Back up"))
-        for w in (self.dest_btn, self.layout_box, self.per_device, self.split, self.more_btn):
+        for w in (self.dest_btn, self.layout_box, self.per_device, self.split, self.more_btn,
+                  self.capture_box, self.shots_box, self.device_box):
             w.setEnabled(not busy)
         self.act_full.setEnabled(state == "ready" and bool(self.entries))
+        if not busy:
+            self.capture_box.setEnabled(self.layout_box.currentData() not in ("dcim", "flat"))
         has_dev = bool(self.dev) and not self.source
         self.act_repair.setEnabled(has_dev)
         self.retry_btn.setVisible(state in ("missing", "error"))
@@ -362,12 +399,14 @@ class MainWindow(QMainWindow):
         if self.per_device.isChecked():
             folder = sync.safe_name(self.dev.label) if self.dev else "iPhone"
         photos, videos = (tr("Photos"), tr("Videos")) if self.split.isChecked() else ("", "")
-        return sync.Options(self.layout_box.currentData(), folder, photos, videos)
+        shots = tr("Screenshots") if self.shots_box.isChecked() else ""
+        return sync.Options(self.layout_box.currentData(), folder, photos, videos, shots,
+                            self.capture_box.isChecked())
 
     def _show_example(self):
         o = self._options()
         t = time.mktime((2026, 11, 3, 14, 0, 0, 0, 0, -1))
-        parts = [o.device_folder, o.photo_dir, sync.layout_dir(o.layout, t, "100APPLE"), "IMG_0001.HEIC"]
+        parts = [o.device_folder, o.photo_dir or o.screenshot_dir and "", sync.layout_dir(o.layout, t, "100APPLE"), "IMG_0001.HEIC"]
         self.example.setText(tr("Example") + ": " + "/".join(p for p in parts if p))
 
     # ------------------------------------------------------------ start / polling
@@ -404,14 +443,65 @@ class MainWindow(QMainWindow):
     def _polled(self, ids, _err):
         self._polling = False
         ids = ids or []
+        self._update_devices(ids)
         if self.dev and self.dev.udid not in ids:
             self._device_gone()
             return
         if self.dev is None and ids:
-            self.dev = device.Device(ids[0])
+            self.dev = device.Device(self._wanted if self._wanted in ids else ids[0])
+            self._sync_device_box()
             self._connect()
         elif self.dev and self.state in ("locked", "trust", "nophotos", "error") and time.monotonic() >= self._retry_at:
             self._connect()
+
+    def _update_devices(self, ids):
+        for gone in [u for u in self.devices if u not in ids]:
+            del self.devices[gone]
+        for udid in ids:
+            if udid not in self.devices:
+                self.devices[udid] = ""
+            if not self.devices[udid] and udid not in self._naming and len(ids) > 1:
+                self._naming.add(udid)
+                self._call(device.info, lambda d, err, u=udid: self._named(u, d), udid)
+        self._sync_device_box()
+
+    def _named(self, udid, dev):
+        self._naming.discard(udid)
+        if udid in self.devices and dev is not None:
+            self.devices[udid] = dev.name or udid[:8]
+            self._sync_device_box()
+
+    def _sync_device_box(self):
+        box = self.device_box
+        items = [(u, n or u[:8]) for u, n in self.devices.items()]
+        current = [(box.itemData(i), box.itemText(i)) for i in range(box.count())]
+        if items != current:
+            box.blockSignals(True)
+            box.clear()
+            for udid, name in items:
+                box.addItem(name, udid)
+            box.blockSignals(False)
+        if self.dev:
+            i = box.findData(self.dev.udid)
+            if i >= 0:
+                box.setCurrentIndex(i)
+        box.setVisible(len(items) > 1 and not self.source)
+
+    def _device_chosen(self, i):
+        udid = self.device_box.itemData(i)
+        if not udid or (self.dev and self.dev.udid == udid):
+            return
+        if self.worker or self._connecting:
+            self._sync_device_box()   # not now: put the box back
+            return
+        self._wanted = udid
+        if self.mount:
+            device.unmount(self.mount)
+        self.mount = self.dcim = self.entries = self.plan = None
+        self._meta_cache = {}
+        self.summary.clear()
+        self.dev = device.Device(udid)
+        self._connect()
 
     def _device_gone(self):
         if self.worker:
@@ -420,6 +510,7 @@ class MainWindow(QMainWindow):
         if self.mount:
             device.unmount(self.mount, lazy=True)
         self.dev = self.mount = self.dcim = self.entries = self.plan = None
+        self._meta_cache = {}
         self.title.setText("DCIMDock")
         self.summary.clear()
         self.bar.setValue(0)
@@ -502,11 +593,20 @@ class MainWindow(QMainWindow):
         root = Path(self.dest)
         opts = self._options()
         udid = self.dev.udid
-        self._call(lambda: self._plan_blocking(root, udid, opts), self._planned)
+        self._plan_gen += 1
+        gen = self._plan_gen
+        self._call(lambda: self._plan_blocking(root, udid, opts),
+                   lambda res, err: self._planned(res, err) if gen == self._plan_gen else None)
 
     def _plan_blocking(self, root, udid, opts):
         index = sync.Index(root, udid)
-        return index, sync.make_plan(self.entries, index, opts)
+        need = sync.needs_meta(self.entries, index, opts)
+        meta = sync.read_meta(self.dcim, need, self._meta_cache, self.meta_sig.step.emit) if need else None
+        return index, sync.make_plan(self.entries, index, opts, meta)
+
+    def _meta_step(self, i, n):
+        if self.state == "scanning":
+            self.status.setText(tr("Reading capture dates… {i} of {n}", i=num(i), n=num(n)))
 
     def _planned(self, res, err):
         if self.dev is None:
@@ -523,7 +623,7 @@ class MainWindow(QMainWindow):
         elif not p.tasks:
             text = tr("Everything is saved ({k} files).", k=num(known))
         else:
-            text = tr("{n} new files ({size}) · {k} already saved",
+            text = tr("{n} new files ({size}) · {k} already saved" if len(p.tasks) != 1 else "1 new file ({size}) · {k} already saved",
                       n=num(len(p.tasks)), size=size(p.bytes), k=num(known))
         self.summary.setText(f"<b>{text}</b>")
         if p.tasks:
@@ -543,6 +643,8 @@ class MainWindow(QMainWindow):
         self.settings.setValue("layout", self.layout_box.currentData())
         self.settings.setValue("per_device", self.per_device.isChecked())
         self.settings.setValue("split", self.split.isChecked())
+        self.settings.setValue("capture_date", self.capture_box.isChecked())
+        self.settings.setValue("screenshots", self.shots_box.isChecked())
         self._show_example()
         self._replan()
 
@@ -664,8 +766,18 @@ class MainWindow(QMainWindow):
             return
         stamp = time.strftime("%Y-%m-%d %H-%M")
         root = Path(self.dest) / f"{tr('Full copy')} {stamp}"
-        index = sync.Index(root, self.dev.udid)
-        plan = sync.make_plan(self.entries, index, self._options())
+        udid, opts = self.dev.udid, self._options()
+        self._set_state("scanning", tr("Reading the photo list…"))
+        self._call(lambda: self._plan_blocking(root, udid, opts), self._full_planned)
+
+    def _full_planned(self, res, err):
+        if self.dev is None:
+            return
+        self._set_state("ready", tr("Ready.") if not self.source else str(self.dcim))
+        if err or res is None:
+            return
+        index, plan = res
+        root = index.root
         ok, free = sync.free_space_ok(Path(self.dest), plan.bytes)
         text = tr("Copies all {n} files ({size}) from the iPhone into a new folder, without comparing with earlier backups:\n\n{folder}\n\nThe normal backup is not touched.",
                   n=num(len(plan.tasks)), size=size(plan.bytes), folder=root)
@@ -813,6 +925,8 @@ class MainWindow(QMainWindow):
             ev.ignore()
             return
         self.poll_timer.stop()
+        self.preview_timer.stop()
+        self.pool.waitForDone(3000)
         for c in list(self._calls):
             c.wait(3000)
         if self.mount:

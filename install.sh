@@ -44,8 +44,8 @@ elif [ -n "$pm" ]; then
     read -r -p "Install the missing packages now with '$pm $pkgs'? [Y/n] " reply
     case "$reply" in
         [nN]*) echo "Skipped. Install them, then run this script again."; exit 1 ;;
-        # shellcheck disable=SC2086
-        *)     $pm $pkgs ;;
+        *)     # shellcheck disable=SC2086
+               $pm $pkgs ;;
     esac
 else
     echo "Please install PySide6, ifuse, libimobiledevice (tools) and usbmuxd from your distribution."

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dcimdock import sync
 
+DATA = Path(__file__).parent / "data"
 NOV = time.mktime((2026, 11, 3, 12, 0, 0, 0, 0, -1))
 OCT_END = time.mktime((2026, 10, 31, 23, 59, 50, 0, 0, -1))
 
@@ -207,6 +208,46 @@ class TestSync(Fake):
         self.assertEqual(res.ok, 1)
         self.assertEqual(res.missing, ["Phone/2026/2026-11/IMG_0001.HEIC"])
         self.assertEqual(res.changed, ["Phone/2026/2026-11/IMG_0002.HEIC"])
+
+
+    def plan_with_meta(self, **kw):
+        entries = sync.scan(self.dcim)
+        index = sync.Index(self.dest, "UDID")
+        opts = sync.Options("ym", "", **kw)
+        meta = sync.read_meta(self.dcim, sync.needs_meta(entries, index, opts), {})
+        return sync.make_plan(entries, index, opts, meta)
+
+    def test_capture_date_sorts_old_photo_into_its_month(self):
+        self.put("100APPLE/IMG_0001.HEIC", (DATA / "photo.heic").read_bytes())   # taken 2019-07
+        self.put("100APPLE/IMG_0002.JPG", (DATA / "photo.jpg").read_bytes())
+        self.put("100APPLE/IMG_0003.JPG", b"no exif at all")
+        dests = sorted(t.dest for t in self.plan_with_meta().tasks)
+        self.assertEqual(dests, ["2019/2019-07/IMG_0001.HEIC", "2019/2019-07/IMG_0002.JPG",
+                                 "2026/2026-11/IMG_0003.JPG"])
+        dests = sorted(t.dest for t in self.plan_with_meta(capture_date=False).tasks)
+        self.assertTrue(all(d.startswith("2026/2026-11/") for d in dests))
+
+    def test_live_photo_movie_follows_photo_capture_date(self):
+        self.put("100APPLE/IMG_0004.HEIC", (DATA / "photo.heic").read_bytes())
+        self.put("100APPLE/IMG_0004.MOV", (DATA / "video.mov").read_bytes())  # mvhd says 2020
+        dests = sorted(t.dest for t in self.plan_with_meta().tasks)
+        self.assertEqual(dests, ["2019/2019-07/IMG_0004.HEIC", "2019/2019-07/IMG_0004.MOV"])
+
+    def test_screenshots_folder(self):
+        self.put("100APPLE/IMG_0005.PNG", (DATA / "screenshot.png").read_bytes())
+        self.put("100APPLE/IMG_0006.PNG", (DATA / "plain.png").read_bytes())
+        self.put("100APPLE/IMG_0007.MOV", (DATA / "video.mov").read_bytes())
+        plan = self.plan_with_meta(capture_date=False, screenshot_dir="Screenshots",
+                                   photo_dir="Photos", video_dir="Videos")
+        self.assertEqual(sorted(t.dest for t in plan.tasks), [
+            "Photos/2026/2026-11/IMG_0006.PNG", "Screenshots/2026/2026-11/IMG_0005.PNG",
+            "Videos/2026/2026-11/IMG_0007.MOV"])
+
+    def test_known_files_are_not_read_again(self):
+        self.put("100APPLE/IMG_0001.JPG", (DATA / "photo.jpg").read_bytes())
+        self.sync()
+        entries = sync.scan(self.dcim)
+        self.assertEqual(sync.needs_meta(entries, sync.Index(self.dest, "UDID"), sync.Options("ym", "Phone")), [])
 
 
 class TestNames(unittest.TestCase):

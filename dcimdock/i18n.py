@@ -36,6 +36,7 @@ DE = {
     "Preview": "Vorschau",
     # summary
     "{n} new files ({size}) · {k} already saved": "{n} neue Dateien ({size}) · {k} schon gesichert",
+    "1 new file ({size}) · {k} already saved": "1 neue Datei ({size}) · {k} schon gesichert",
     "Everything is saved ({k} files).": "Alles ist gesichert ({k} Dateien).",
     "No photos on the iPhone.": "Keine Fotos auf dem iPhone.",
     "Only {free} free in the backup folder, {need} needed.":
@@ -116,6 +117,15 @@ DE = {
     "Released a stuck iPhone folder: {where}": "Hängenden iPhone-Ordner gelöst: {where}",
     "The photos are not visible yet. Unlock your iPhone. (If it has no photos at all, this stays.)":
         "Die Fotos sind noch nicht sichtbar. Entsperre dein iPhone. (Hat es gar keine Fotos, bleibt das so.)",
+    # 0.1.0 – capture date, screenshots, several iPhones
+    "Sort by the date the photo was taken (EXIF)": "Nach Aufnahmedatum sortieren (EXIF)",
+    "Reads the capture date from the photo or video. Off: the file date is used, which for saved or imported pictures is the day they were saved.":
+        "Liest das Aufnahmedatum aus Foto oder Video. Aus: Es zählt das Dateidatum, bei gespeicherten oder importierten Bildern also der Tag des Speicherns.",
+    "Screenshots apart": "Screenshots trennen",
+    "Screenshots": "Screenshots",
+    "Reading capture dates… {i} of {n}": "Lese Aufnahmedaten … {i} von {n}",
+    "Several iPhones are connected. Pick the one to back up.":
+        "Mehrere iPhones sind angeschlossen. Wähle das, das gesichert werden soll.",
     # intro dialog
     "Don’t show this again": "Nicht mehr anzeigen",
     "INTRO_HTML": None,  # filled below

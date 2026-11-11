@@ -48,8 +48,14 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
 * Folders as you like: year/month (`2026/2026-11`), year/month/day, month,
   year, like on the iPhone (`100APPLE`) or all in one folder. Optionally a
   folder per iPhone and **photos and videos apart** (`Photos/…`, `Videos/…`;
-  a Live Photo's video stays with its photo). The window shows an example
-  path.
+  a Live Photo's video stays with its photo) and **screenshots apart**
+  (recognised by the "Screenshot" mark iOS writes into them, not by guessing
+  from `.PNG`). The window shows an example path.
+* Sorts by the **date the photo was taken** (EXIF in JPEG, HEIC, PNG and DNG;
+  the movie header in MOV and MP4), so an old picture you imported or saved
+  lands in its own year, not in the month you saved it. Only new files are
+  looked into, and it can be switched off to use the file date.
+* **Several iPhones** at once: a list in the title picks the one to back up.
 * Checks the free space before it starts.
 * Progress bar with speed and time left. The **preview** of the photo just
   copied is decoded at reduced size in its own thread, at most about twice a
@@ -76,7 +82,7 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
 * If the iPhone was mounted while locked (an empty pseudo folder without
   `DCIM`), DCIMDock unmounts it and asks you to unlock.
 * Terminal mode for scripts:
-  `dcimdock --cli [--dest DIR] [--layout ym|ymd|m|y|dcim|flat] [--split] [--full] [--dry-run]`,
+  `dcimdock --cli [--dest DIR] [--layout ym|ymd|m|y|dcim|flat] [--split] [--screenshots] [--file-date] [--full] [--dry-run]`,
   and `dcimdock --verify --dest DIR` to check a backup.
 * English or German, following the system language.
 

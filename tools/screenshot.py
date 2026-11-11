@@ -7,6 +7,7 @@ copy is slowed down so the picture shows a backup in progress.
 """
 import os
 import random
+import shutil
 import sys
 import tempfile
 import time
@@ -113,3 +114,4 @@ QTimer.singleShot(1200, go)
 QTimer.singleShot(9000, shoot)
 QTimer.singleShot(12000, app.quit)
 app.exec()
+shutil.rmtree(tmp, ignore_errors=True)

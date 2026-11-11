@@ -84,15 +84,25 @@ def cli(args) -> int:
         entries = sync.scan(dcim)
         index = sync.Index(root, dev.udid)
         split = (tr("Photos"), tr("Videos")) if args.split else ("", "")
-        opts = sync.Options(args.layout, "" if args.no_device_folder else sync.safe_name(dev.label), *split)
-        plan = sync.make_plan(entries, index, opts)
+        opts = sync.Options(args.layout, "" if args.no_device_folder else sync.safe_name(dev.label), *split,
+                            tr("Screenshots") if args.screenshots else "", not args.file_date)
+        need = sync.needs_meta(entries, index, opts)
+        meta = None
+        if need:
+            def step(i, n):
+                if sys.stdout.isatty():
+                    print("\r" + tr("Reading capture dates… {i} of {n}", i=num(i), n=num(n)), end="", flush=True)
+            meta = sync.read_meta(dcim, need, {}, step)
+            if sys.stdout.isatty():
+                print()
+        plan = sync.make_plan(entries, index, opts, meta)
         known = plan.known + len(plan.adopted)
         if not plan.tasks:
             print(tr("Everything is saved ({k} files).", k=num(known)))
             if plan.adopted:
                 index.save()   # remember files that were found already copied
             return 0
-        print(tr("{n} new files ({size}) · {k} already saved",
+        print(tr("{n} new files ({size}) · {k} already saved" if len(plan.tasks) != 1 else "1 new file ({size}) · {k} already saved",
                  n=num(len(plan.tasks)), size=size(plan.bytes), k=num(known)))
         print(f"→ {root}")
         if args.dry_run:
@@ -175,6 +185,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="ym: 2026/2026-11 (default), ymd: 2026/2026-11/2026-11-03, m: 2026-11, "
                              "y: 2026, dcim: like on the iPhone, flat: one folder")
     parser.add_argument("--split", action="store_true", help="photos and videos into separate folders")
+    parser.add_argument("--screenshots", action="store_true", help="screenshots into their own folder")
+    parser.add_argument("--file-date", action="store_true",
+                        help="sort by the file date instead of the capture date from EXIF")
     parser.add_argument("--full", action="store_true",
                         help="copy everything into a new folder, without comparing with earlier backups")
     parser.add_argument("--verify", action="store_true",

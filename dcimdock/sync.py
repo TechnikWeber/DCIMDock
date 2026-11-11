@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import meta as metadata
+
 CHUNK = 1 << 20          # 1 MiB reads: few round trips over AFC, low memory
 INDEX_DIR = ".dcimdock"  # inside the destination, so it travels with the backup
 SPACE_RESERVE = 200 * 1024 * 1024
@@ -90,6 +92,8 @@ class Options:
     device_folder: str = ""    # subfolder per iPhone, "" for none
     photo_dir: str = ""        # split photos and videos into these two
     video_dir: str = ""        # folders; both "" for no split
+    screenshot_dir: str = ""   # screenshots into their own folder, "" for no
+    capture_date: bool = True  # folders by EXIF capture date instead of file date
 
 
 def is_media(name: str) -> str:
@@ -137,8 +141,10 @@ def layout_dir(layout: str, t: float, folder: str) -> str:
     return ""
 
 
-def group_kind(members) -> str:
+def group_kind(members, meta: Optional[dict] = None) -> str:
     """A group with a still image is a photo (a Live Photo's MOV stays with it)."""
+    if meta and any(meta.get(e.rel) and meta[e.rel].screenshot for e in members):
+        return "screenshot"
     kinds = {is_media(e.name) for e in members}
     if "image" in kinds:
         return "image"
@@ -225,7 +231,44 @@ def _same_file(p: Path, e: Entry) -> Optional[bool]:
     return st.st_size == e.size and abs(st.st_mtime - e.mtime) <= 2
 
 
-def make_plan(entries: list[Entry], index: Index, opts: Options) -> Plan:
+def needs_meta(entries: list[Entry], index: Index, opts: Options) -> list[Entry]:
+    """Only new files have to be looked into, and only if an option needs it."""
+    dates = opts.capture_date and opts.layout not in ("dcim", "flat")
+    shots = bool(opts.screenshot_dir)
+    if not (dates or shots):
+        return []
+    out = []
+    for e in entries:
+        if index.known(e):
+            continue
+        if dates or (shots and e.name.lower().endswith(".png")):
+            out.append(e)
+    return out
+
+
+def read_meta(dcim: Path, entries: list[Entry], cache: dict,
+              progress: Callable[[int, int], None] = lambda i, n: None,
+              cancel: Callable[[], bool] = lambda: False) -> dict:
+    """rel -> meta.Meta for the given entries, reusing what cache already has."""
+    todo = [e for e in entries if (e.rel, e.size, e.mtime) not in cache]
+    for i, e in enumerate(todo, 1):
+        if cancel():
+            raise Cancelled
+        if i % 10 == 0 or i == len(todo):
+            progress(i, len(todo))
+        cache[(e.rel, e.size, e.mtime)] = metadata.read(str(dcim / e.rel))
+    return {e.rel: cache[(e.rel, e.size, e.mtime)] for e in entries if (e.rel, e.size, e.mtime) in cache}
+
+
+def group_time(members: list[Entry], meta: Optional[dict], use_capture: bool) -> float:
+    if use_capture and meta:
+        dates = [meta[e.rel].date for e in members if meta.get(e.rel) and meta[e.rel].date]
+        if dates:
+            return min(dates)
+    return min(e.mtime for e in members)
+
+
+def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[dict] = None) -> Plan:
     plan = Plan()
     root = index.root
     reserved: set[str] = set()
@@ -258,10 +301,13 @@ def make_plan(entries: list[Entry], index: Index, opts: Options) -> Plan:
             m = _SUFFIX.match(got[len(orig):]) if got.startswith(orig) else None
             start = int(m.group(1)) if m else 0
         else:
-            sub = layout_dir(opts.layout, min(e.mtime for e in members), folder)
+            sub = layout_dir(opts.layout, group_time(members, meta, opts.capture_date), folder)
+            kind = group_kind(members, meta)
             kind_dir = ""
-            if opts.photo_dir and opts.video_dir:
-                kind_dir = opts.video_dir if group_kind(members) == "video" else opts.photo_dir
+            if kind == "screenshot" and opts.screenshot_dir:
+                kind_dir = opts.screenshot_dir
+            elif opts.photo_dir and opts.video_dir:
+                kind_dir = opts.video_dir if kind == "video" else opts.photo_dir
             base = "/".join(p for p in (opts.device_folder, kind_dir, sub) if p)
 
         n = start
