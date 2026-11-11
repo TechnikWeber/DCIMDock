@@ -1,8 +1,9 @@
 # Changelog
 
-## [0.1.0] - 2026-11-11
+## [0.1.1] - 2026-11-11
 
-First release.
+First release. (The v0.1.0 tag was never released: its AppImage crashed on
+exit with PySide 6.12.)
 
 * Detects the iPhone, guides through Trust and passcode, mounts it read-only.
 * Copies only new files, never overwrites, `.part` files until a file is
