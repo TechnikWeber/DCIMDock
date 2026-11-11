@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.technikweber.dcimdock</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>DCIMDock</name>
+  <summary>Copy the photos and videos from an iPhone to this computer</summary>
+  <description>
+    <p>
+      A small window that copies the camera roll of an iPhone over USB. Only
+      new files are copied, nothing is ever overwritten, and nothing on the
+      iPhone is changed. A progress bar shows speed and time left; a preview
+      of the photo just copied can be switched on.
+    </p>
+  </description>
+  <launchable type="desktop-id">dcimdock.desktop</launchable>
+  <url type="homepage">https://github.com/TechnikWeber/DCIMDock</url>
+  <url type="bugtracker">https://github.com/TechnikWeber/DCIMDock/issues</url>
+  <developer id="io.github.technikweber">
+    <name>Philipp Weber</name>
+  </developer>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/TechnikWeber/DCIMDock/main/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-11"/>
+  </releases>
+</component>

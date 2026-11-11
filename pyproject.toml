@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dcimdock"
+dynamic = ["version"]
+description = "Copy the photos and videos from an iPhone to this computer"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Philipp Weber" }]
+keywords = ["iphone", "ios", "photos", "backup", "libimobiledevice", "qt"]
+classifiers = [
+    "Environment :: X11 Applications :: Qt",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = ["PySide6>=6.5"]
+
+[project.urls]
+Homepage = "https://github.com/TechnikWeber/DCIMDock"
+
+[project.gui-scripts]
+dcimdock = "dcimdock.app:main"
+
+[tool.setuptools]
+packages = ["dcimdock"]
+
+[tool.setuptools.dynamic]
+version = { attr = "dcimdock.__version__" }
+
+[tool.setuptools.package-data]
+dcimdock = ["dcimdock.svg"]

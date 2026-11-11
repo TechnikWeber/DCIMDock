@@ -1,0 +1,67 @@
+name: release
+
+# Tag v1.2.3 -> GitHub release with AppImage (+ .zsync) and RPM.
+# "Run workflow" by hand builds the same files as artifacts only.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build AppImage
+        run: packaging/appimage/build.sh
+      - name: Start it on Fedora (offscreen)
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" -e QT_QPA_PLATFORM=offscreen \
+            registry.fedoraproject.org/fedora:45 bash -ec '
+              dnf install -y -q libglvnd-glx libglvnd-egl mesa-libGL mesa-libEGL libxkbcommon fontconfig dbus-libs >/dev/null
+              cd /tmp && /dist/dcimdock-*-x86_64.AppImage --appimage-extract-and-run --selftest'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*
+
+  rpm:
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build RPM
+        run: packaging/rpm/build.sh
+      - name: Install and start
+        run: |
+          dnf install -y dist/*.noarch.rpm
+          QT_QPA_PLATFORM=offscreen dcimdock --selftest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: dist/*.noarch.rpm
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [appimage, rpm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[?"v"\\]?" {f=1; next} /^## / {f=0} f' CHANGELOG.md > notes.md
+          cat notes.md
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md dist/*

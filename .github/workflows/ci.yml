@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+      - name: ShellCheck
+        run: shellcheck bin/dcimdock install.sh uninstall.sh packaging/appimage/build.sh packaging/rpm/build.sh
+
+  rpm:
+    # builds and installs the RPM on real Fedora, then opens the window offscreen
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build RPM
+        run: packaging/rpm/build.sh
+      - name: Install and start
+        run: |
+          dnf install -y dist/*.noarch.rpm
+          QT_QPA_PLATFORM=offscreen dcimdock --selftest
