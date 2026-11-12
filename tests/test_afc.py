@@ -175,7 +175,7 @@ class TestAfc(unittest.TestCase):
 
     def test_backend_api_matches(self):
         from dcimdock import device
-        names = ["Device", "DeviceError", "NoPhotos", "HAS_MOUNTS", "SERVICE_ACTION", "missing",
+        names = ["Device", "DeviceError", "NoPhotos", "HAS_MOUNTS", "INSTALL_URL", "SERVICE_ACTION", "missing",
                  "install_command", "cleanup_stale", "broken_mounts", "release_mounts", "list_devices",
                  "info", "pair", "repair_pairing", "restart_service", "diagnose", "mount", "dcim_of", "unmount"]
         for name in names:

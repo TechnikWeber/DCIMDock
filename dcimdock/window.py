@@ -708,6 +708,9 @@ class MainWindow(QMainWindow):
         self.retry_btn = QPushButton(tr("Check again"))
         self.retry_btn.clicked.connect(self.start)
         self.retry_btn.hide()
+        self.store_btn = QPushButton(tr("Open Microsoft Store"))
+        self.store_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(device.INSTALL_URL)))
+        self.store_btn.hide()
         self.go_btn = QPushButton(tr("Back up"))
         self.go_btn.setDefault(True)
         self.go_btn.clicked.connect(self.go_or_stop)
@@ -718,6 +721,7 @@ class MainWindow(QMainWindow):
         self.update_label.hide()
         btns.addWidget(self.update_label)
         btns.addStretch(1)
+        btns.addWidget(self.store_btn)
         btns.addWidget(self.retry_btn)
         btns.addWidget(self.go_btn)
         lay.addLayout(btns)
@@ -751,6 +755,7 @@ class MainWindow(QMainWindow):
         has_dev = bool(self.dev) and not self.source
         self.act_repair.setEnabled(has_dev)
         self.retry_btn.setVisible(state in ("missing", "error"))
+        self.store_btn.setVisible(state == "missing" and bool(device.INSTALL_URL))
 
     def _show_dest(self):
         self.dest_label.setText(native(self.dest))

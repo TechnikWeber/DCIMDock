@@ -184,7 +184,8 @@ DE = {
     "Restart the iPhone service (Apple Mobile Device Service)":
         "iPhone-Dienst neu starten (Apple Mobile Device Service)",
     "“Apple Devices” from the Microsoft Store (or iTunes from apple.com)":
-        "„Apple-Geräte“ aus dem Microsoft Store (oder iTunes von apple.com)",
+        "„Apple Geräte“ aus dem Microsoft Store (oder iTunes von apple.com)",
+    "Open Microsoft Store": "Microsoft Store öffnen",
     "Diagnosis…": "Diagnose …",
     "Diagnosis": "Diagnose",
     "Paste this into a bug report:": "Für eine Fehlermeldung hier herauskopieren:",

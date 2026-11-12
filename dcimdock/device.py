@@ -16,6 +16,7 @@ from pathlib import Path
 
 TOOLS = ("idevice_id", "ideviceinfo", "idevicepair", "ifuse")
 HAS_MOUNTS = True     # the Windows backend (afc.py) reads without mounting
+INSTALL_URL = ""      # a web page that installs what is missing (Windows: Microsoft Store)
 SERVICE_ACTION = "Restart the iPhone service (usbmuxd)"
 _UDID = re.compile(r"^[0-9A-Fa-f-]{24,40}$")
 

@@ -29,6 +29,8 @@ from .device import Device, DeviceError, NoPhotos  # noqa: F401 – part of the 
 from .sync import Cancelled, Entry
 
 HAS_MOUNTS = False
+# Microsoft Store page of the "Apple Devices" app (brings the Apple Mobile Device Service)
+INSTALL_URL = "https://apps.microsoft.com/detail/9NP83LWLPZ9K" if sys.platform == "win32" else ""
 SERVICE_ACTION = ("Restart the iPhone service (Apple Mobile Device Service)" if sys.platform == "win32"
                   else "Restart the iPhone service (usbmuxd)")
 DCIM = "/DCIM"
@@ -116,7 +118,7 @@ def missing() -> list[str]:
 def install_command(info: dict | None = None) -> str:
     if sys.platform == "win32":
         from .i18n import tr
-        return tr("“Apple Devices” from the Microsoft Store (or iTunes from apple.com)")
+        return tr("“Apple Devices” from the Microsoft Store (or iTunes from apple.com)") + "\n" + INSTALL_URL
     return "pip install pymobiledevice3"
 
 

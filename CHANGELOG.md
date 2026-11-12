@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.2] - 2026-11-12
+
+(The tag v0.5.1 went out by mistake on the code of 0.5.0; it has no release.)
+
+* Windows: when Apple's driver is missing, an *Open Microsoft Store* button
+  goes straight to the *Apple Devices* app; the terminal prints the link.
+  The German text names the app *Apple Geräte* without a hyphen, as the
+  Store does, so searching for it finds it.
+
 ## [0.5.0] - 2026-11-12
 
 * **Beta: Photos library.** Off by default (*Settings → Beta features*).

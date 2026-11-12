@@ -184,8 +184,9 @@ package manager (dnf, apt, pacman or zypper).
 
 ### Windows
 
-1. Install Apple's driver: the **Apple Devices** app from the Microsoft
-   Store (or iTunes from apple.com). DCIMDock talks to the iPhone through its
+1. Install Apple's driver: the **Apple Devices** app from the
+   [Microsoft Store](https://apps.microsoft.com/detail/9NP83LWLPZ9K)
+   (German Windows: *Apple Geräte*; or iTunes from apple.com). DCIMDock talks to the iPhone through its
    *Apple Mobile Device Service*. You do not have to open the app.
 2. Download `DCIMDock-*-windows-x64.exe` from the
    [latest release](https://github.com/TechnikWeber/DCIMDock/releases/latest)
