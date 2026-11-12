@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.5] - 2026-11-12
+
+* **Windows: Update now.** Next to the notice of a new version: downloads
+  the new `.exe` beside the old one, checks it against `SHA256SUMS`, starts
+  it and quits; the new one deletes the old file. While a backup runs it
+  waits. If it fails: the reason and the link to download by hand.
+* Every release carries `SHA256SUMS` for all files.
+
 ## [0.5.4] - 2026-11-12
 
 * Windows: a *Start the iPhone service* button on the screen that says

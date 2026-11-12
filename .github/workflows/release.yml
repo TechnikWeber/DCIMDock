@@ -79,6 +79,8 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Checksums (the Windows .exe checks its update against them)
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - name: Release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"

@@ -186,6 +186,13 @@ DE = {
     "“Apple Devices” from the Microsoft Store (or iTunes from apple.com)":
         "„Apple Geräte“ aus dem Microsoft Store (oder iTunes von apple.com)",
     "Open Microsoft Store": "Microsoft Store öffnen",
+    "Update now": "Jetzt aktualisieren",
+    "Downloads the new version, checks it and restarts DCIMDock.":
+        "Lädt die neue Version herunter, prüft sie und startet DCIMDock neu.",
+    "Please wait until the backup is finished.": "Bitte warte, bis die Sicherung fertig ist.",
+    "Downloading…": "Lade herunter …",
+    "The update did not work: {msg}": "Das Update hat nicht geklappt: {msg}",
+    "You can download it by hand: {page}": "Du kannst es von Hand herunterladen: {page}",
     "Start the iPhone service": "iPhone-Dienst starten",
     "Could not start the service: {msg}": "Der Dienst ließ sich nicht starten: {msg}",
     "“Apple Devices” is installed, but its driver did not start. Sign out of Windows and in again, or restart the PC.":

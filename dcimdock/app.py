@@ -280,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--selftest", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--background", action="store_true",
                         help="start with only the tray icon (used by the autostart)")
+    parser.add_argument("--replace", metavar="OLD_EXE", help=argparse.SUPPRESS)  # set by the self update
     args = parser.parse_args(argv)
 
     if args.verify:
@@ -298,6 +299,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.selftest:
         autostart.follow()
+    if args.replace:
+        import threading
+        from . import update
+        threading.Thread(target=update.remove_old, args=(args.replace,), daemon=True).start()
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("dcimdock")

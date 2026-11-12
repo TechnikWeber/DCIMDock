@@ -723,6 +723,10 @@ class MainWindow(QMainWindow):
         self.update_label.setOpenExternalLinks(True)
         self.update_label.hide()
         btns.addWidget(self.update_label)
+        self.update_btn = QPushButton()
+        self.update_btn.clicked.connect(self.update_itself)
+        self.update_btn.hide()
+        btns.addWidget(self.update_btn)
         btns.addStretch(1)
         btns.addWidget(self.store_btn)
         btns.addWidget(self.svc_btn)
@@ -1495,8 +1499,45 @@ class MainWindow(QMainWindow):
         v, page = res
         self.update_label.setText(f'<a href="{page}">' + tr("Version {v} is available", v=v) + "</a>")
         self.update_label.show()
+        if update.can_update_itself():
+            self.update_btn.setText(tr("Update now"))
+            self.update_btn.setToolTip(tr("Downloads the new version, checks it and restarts DCIMDock."))
+            self.update_btn.show()
         if self.tray and not self.isVisible():
             self.tray.showMessage("DCIMDock", tr("Version {v} is available", v=v), QSystemTrayIcon.Information, 8000)
+
+    def update_itself(self):
+        """Windows .exe: fetch the new one, start it, quit. It deletes this file."""
+        if not self._update:
+            return
+        if self.worker or self.state == "fixing":
+            QMessageBox.information(self, "DCIMDock", tr("Please wait until the backup is finished."))
+            return
+        v = self._update[0]
+        self.update_btn.setEnabled(False)
+        self.update_btn.setText(tr("Downloading…"))
+
+        def done(path, err):
+            if err or not path:
+                self.update_btn.setEnabled(True)
+                self.update_btn.setText(tr("Update now"))
+                QMessageBox.warning(self, "DCIMDock", tr("The update did not work: {msg}", msg=_short(str(err)) or "-")
+                                    + "\n\n" + tr("You can download it by hand: {page}", page=self._update[1]))
+                return
+            import subprocess
+            import sys
+            args = [str(path), "--replace", sys.executable]
+            if not self.isVisible():
+                args.append("--background")
+            try:
+                subprocess.Popen(args, close_fds=True, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+            except OSError as exc:
+                self.update_btn.setEnabled(True)
+                self.update_btn.setText(tr("Update now"))
+                QMessageBox.warning(self, "DCIMDock", tr("The update did not work: {msg}", msg=str(exc)))
+                return
+            self.quit_all()
+        self._call(update.download, done, v)
 
     def closeEvent(self, ev):
         if (self.tray and not self._really_quit and not self.selftest
