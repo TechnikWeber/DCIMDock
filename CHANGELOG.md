@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.8] - 2026-11-12
+
+* **Order by: Date taken / Date saved** replaces the checkbox *Sort by the
+  date the photo was taken (EXIF)*, so it is clear what the other choice
+  is. Each choice explains itself in its tooltip; the setting carries over.
+
 ## [0.5.7] - 2026-11-12
 
 * **Check for updates by hand:** *More → Check for updates…*, the tray

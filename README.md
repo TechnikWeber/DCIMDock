@@ -58,7 +58,8 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
 * Sorts by the **date the photo was taken** (EXIF in JPEG, HEIC, PNG and DNG;
   the movie header in MOV and MP4), so an old picture you imported or saved
   lands in its own year, not in the month you saved it. Only new files are
-  looked into, and it can be switched off to use the file date.
+  looked into. *Order by: Date taken / Date saved* chooses; pictures without
+  a capture date (e.g. from WhatsApp) always use the date saved.
 * **Several iPhones** at once: a list in the title picks the one to back up.
 * **Choose what to copy** (*Copy: Choose…*): a period (last 7, 30 or 90
   days, this year, last year, or from one day to another, by capture date or

@@ -166,6 +166,38 @@ def _qdate_time(d: QDate) -> float:
     return time.mktime((d.year(), d.month(), d.day(), 12, 0, 0, 0, 0, -1))
 
 
+class DateChoice(QWidget):
+    """'Order by: date taken | date saved' – an either/or instead of a checkbox.
+
+    Keeps the checkbox interface (isChecked = by capture date), so the rest
+    of the window did not have to change.
+    """
+    toggled = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(QLabel(tr("Order by") + ":"))
+        self.combo = QComboBox()
+        self.combo.addItem(tr("Date taken"), True)
+        self.combo.setItemData(0, tr("The time the camera wrote into the photo or video (EXIF). "
+                                     "Pictures without it, e.g. from WhatsApp, use the date saved."), Qt.ToolTipRole)
+        self.combo.addItem(tr("Date saved"), False)
+        self.combo.setItemData(1, tr("When the file was saved on the iPhone: for pictures saved from apps or "
+                                     "the web the day they were saved; after restoring the iPhone it can be that day."),
+                               Qt.ToolTipRole)
+        self.combo.currentIndexChanged.connect(lambda _: self.toggled.emit(self.isChecked()))
+        row.addWidget(self.combo)
+        self.setToolTip(tr("Decides the date folder, the period in “Copy” and the time in file names."))
+
+    def isChecked(self) -> bool:
+        return bool(self.combo.currentData())
+
+    def setChecked(self, on: bool):
+        self.combo.setCurrentIndex(0 if on else 1)
+
+
 class SelectionChoice:
     """What the selection dialog stores: a preset plus the custom days, so
     "last 30 days" stays relative to today."""
@@ -275,7 +307,7 @@ class SelectionDialog(QDialog):
         days.addStretch(1)
         form.addRow(tr("From") + ":", days)
         basis = QLabel(tr("Uses the date the photo was taken (EXIF), else the file date.") if capture_date
-                       else tr("Uses the file date (“Sort by the date the photo was taken” is off)."))
+                       else tr("Uses the date saved (“Order by” in the window)."))
         basis.setWordWrap(True)
         basis.setStyleSheet("color: palette(placeholder-text);")
         form.addRow(basis)
@@ -633,8 +665,7 @@ class MainWindow(QMainWindow):
         opt_row.addStretch(1)
         lay.addLayout(opt_row)
         opt_row2 = QHBoxLayout()
-        self.capture_box = QCheckBox(tr("Sort by the date the photo was taken (EXIF)"))
-        self.capture_box.setToolTip(tr("Reads the capture date from the photo or video. Off: the file date is used, which for saved or imported pictures is the day they were saved."))
+        self.capture_box = DateChoice()
         self.shots_box = QCheckBox(tr("Screenshots apart"))
         opt_row2.addWidget(self.capture_box)
         opt_row2.addWidget(self.shots_box)

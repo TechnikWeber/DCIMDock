@@ -145,7 +145,7 @@ DE = {
     "Period": "Zeitraum",
     "From": "Von",
     "Uses the date the photo was taken (EXIF), else the file date.": "Zählt das Aufnahmedatum (EXIF), sonst das Dateidatum.",
-    "Uses the file date (“Sort by the date the photo was taken” is off).": "Zählt das Dateidatum („Nach Aufnahmedatum sortieren“ ist aus).",
+    "Uses the date saved (“Order by” in the window).": "Zählt das Speicherdatum („Ordnen nach“ im Fenster).",
     "Kinds": "Arten",
     "Pictures from the camera and saved pictures.": "Bilder der Kamera und gespeicherte Bilder.",
     "Videos of their own. The short video of a Live Photo is set below.": "Eigenständige Videos. Das kurze Video eines Live Photos steht weiter unten.",
@@ -220,9 +220,15 @@ DE = {
     "The photos are not visible yet. Unlock your iPhone. (If it has no photos at all, this stays.)":
         "Die Fotos sind noch nicht sichtbar. Entsperre dein iPhone. (Hat es gar keine Fotos, bleibt das so.)",
     # 0.1.0 – capture date, screenshots, several iPhones
-    "Sort by the date the photo was taken (EXIF)": "Nach Aufnahmedatum sortieren (EXIF)",
-    "Reads the capture date from the photo or video. Off: the file date is used, which for saved or imported pictures is the day they were saved.":
-        "Liest das Aufnahmedatum aus Foto oder Video. Aus: Es zählt das Dateidatum, bei gespeicherten oder importierten Bildern also der Tag des Speicherns.",
+    "Order by": "Ordnen nach",
+    "Date taken": "Aufnahmedatum",
+    "Date saved": "Speicherdatum",
+    "The time the camera wrote into the photo or video (EXIF). Pictures without it, e.g. from WhatsApp, use the date saved.":
+        "Die Zeit, die die Kamera ins Foto oder Video geschrieben hat (EXIF). Bilder ohne, z. B. aus WhatsApp, nehmen das Speicherdatum.",
+    "When the file was saved on the iPhone: for pictures saved from apps or the web the day they were saved; after restoring the iPhone it can be that day.":
+        "Wann die Datei auf dem iPhone gespeichert wurde: bei Bildern aus Apps oder dem Web der Tag des Speicherns; nach einer Wiederherstellung des iPhones kann es dieser Tag sein.",
+    "Decides the date folder, the period in “Copy” and the time in file names.":
+        "Bestimmt den Datumsordner, den Zeitraum bei „Kopieren“ und die Zeit im Dateinamen.",
     "Screenshots apart": "Screenshots trennen",
     "Screenshots": "Screenshots",
     "Reading capture dates… {i} of {n}": "Lese Aufnahmedaten … {i} von {n}",
