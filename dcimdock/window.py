@@ -399,10 +399,8 @@ class SettingsDialog(QDialog):
         self.jpeg = QCheckBox(tr("Also save a JPEG next to every HEIC photo"))
         self.jpeg.setToolTip(tr("IMG_0001.HEIC stays as it is, IMG_0001.jpg is added for programs that cannot open HEIC."))
         col.addWidget(self.jpeg)
-        how = jpeg.available()
-        if not how:
-            self.jpeg.setEnabled(False)
-            col.addWidget(self._hint(tr("Needs a HEIC converter: {cmd}", cmd=jpeg.install_hint())))
+        self.jpeg_hint = self._hint("")
+        col.addWidget(self.jpeg_hint)
         lay.addWidget(files)
 
         auto = QGroupBox(tr("Automatic"))
@@ -429,7 +427,11 @@ class SettingsDialog(QDialog):
         lay.addWidget(beta)
 
         self.rename.setChecked(settings.value("rename", False, type=bool))
-        self.jpeg.setChecked(bool(how) and settings.value("jpeg", False, type=bool))
+        self._jpeg_known(jpeg.known())
+        if jpeg.known() is None:    # still loading (slow once on Windows): do not freeze the dialog
+            self.jpeg_hint.setText(tr("Checking the HEIC converter…"))
+            # the main window owns the thread, so quitting waits for it
+            parent._call(jpeg.available, lambda res, err: self._jpeg_known(res or ""))
         self.auto.setChecked(settings.value("auto_backup", False, type=bool))
         self.login.setChecked(autostart.is_enabled())
         self.updates.setChecked(settings.value("check_updates", True, type=bool))
@@ -442,6 +444,14 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
+
+    def _jpeg_known(self, how: str | None):
+        self.jpeg.setEnabled(bool(how))
+        self.jpeg.setChecked(bool(how) and self.settings.value("jpeg", False, type=bool))
+        if how is None:
+            return
+        self.jpeg_hint.setText("" if how else tr("Needs a HEIC converter: {cmd}", cmd=jpeg.install_hint()))
+        self.jpeg_hint.setVisible(not how)
 
     def _auto_toggled(self, on: bool):
         self.login.setEnabled(on)
@@ -460,7 +470,8 @@ class SettingsDialog(QDialog):
     def _accept(self):
         s = self.settings
         s.setValue("rename", self.rename.isChecked())
-        s.setValue("jpeg", self.jpeg.isChecked())
+        if jpeg.known() is not None:    # else the box is only a placeholder: keep the setting
+            s.setValue("jpeg", self.jpeg.isChecked())
         s.setValue("auto_backup", self.auto.isChecked())
         s.setValue("check_updates", self.updates.isChecked())
         s.setValue("beta", self.beta.isChecked())
@@ -542,6 +553,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(300, lambda: self.show_intro(True))
         if not selftest and not source:
             QTimer.singleShot(4000, self._check_update)
+        jpeg.warm_up()
 
     # ------------------------------------------------------------ layout
     def _build(self):
@@ -1125,7 +1137,7 @@ class MainWindow(QMainWindow):
         self.bar.setFormat("0 %")
         self.detail.setText(tr("Preparing…"))
         self.worker = SyncThread(self, plan, self.dcim, index,
-                                 bool(jpeg.available()) and self.settings.value("jpeg", False, type=bool))
+                                 self.settings.value("jpeg", False, type=bool) and bool(jpeg.available()))
         self.worker.progress.connect(self._progress)
         self.worker.file_done.connect(self._file_done)
         self.worker.result.connect(self._finished)

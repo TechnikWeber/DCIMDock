@@ -187,6 +187,7 @@ DE = {
         "„Apple Geräte“ aus dem Microsoft Store (oder iTunes von apple.com)",
     "Open Microsoft Store": "Microsoft Store öffnen",
     "Update now": "Jetzt aktualisieren",
+    "Checking the HEIC converter…": "Prüfe HEIC-Konverter …",
     "Downloads the new version, checks it and restarts DCIMDock.":
         "Lädt die neue Version herunter, prüft sie und startet DCIMDock neu.",
     "Please wait until the backup is finished.": "Bitte warte, bis die Sicherung fertig ist.",

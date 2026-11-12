@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.6] - 2026-11-12
+
+* **Settings open at once.** On Windows the first *Settings* froze the
+  window for up to half a minute: it loaded the HEIC converter
+  (pillow-heif), whose DLLs the `.exe` unpacks anew at every start and the
+  virus scanner reads one by one. Now that happens in the background right
+  after the start; until it is done the dialog says *Checking the HEIC
+  converter…* and keeps the JPEG setting as it was.
+
 ## [0.5.5] - 2026-11-12
 
 * **Windows: Update now.** Next to the notice of a new version: downloads

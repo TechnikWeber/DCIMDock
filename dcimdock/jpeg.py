@@ -14,10 +14,16 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 QUALITY = 92
 HEIC_EXT = {".heic", ".heif"}
+# Loading pillow-heif can take 20 s and more the first time on Windows: the
+# .exe unpacks its DLLs anew at every start and the virus scanner reads each
+# one. So it is asked once, early, in the background (see warm_up).
+_lock = threading.Lock()
+_found: str | None = None
 
 
 def _pillow():
@@ -35,10 +41,22 @@ def _tool() -> str:
 
 
 def available() -> str:
-    """'pillow-heif', 'heif-dec', 'heif-convert' or '' (not possible here)."""
-    if _pillow() is not None:
-        return "pillow-heif"
-    return os.path.basename(_tool())
+    """'pillow-heif', 'heif-dec', 'heif-convert' or '' (not possible here). Can be slow once."""
+    global _found
+    with _lock:
+        if _found is None:
+            _found = "pillow-heif" if _pillow() is not None else os.path.basename(_tool())
+        return _found
+
+
+def known() -> str | None:
+    """What available() found, or None while that is not known yet (never blocks)."""
+    return _found
+
+
+def warm_up() -> None:
+    """Find out in the background, so no window has to wait for it."""
+    threading.Thread(target=available, name="jpeg-warm-up", daemon=True).start()
 
 
 def install_hint() -> str:
