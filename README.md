@@ -188,7 +188,8 @@ package manager (dnf, apt, pacman or zypper).
    [Microsoft Store](https://apps.microsoft.com/detail/9NP83LWLPZ9K)
    (German Windows: *Apple Geräte*; or iTunes from apple.com). DCIMDock talks to the iPhone through its
    *Apple Mobile Device Service*. You do not have to open the app: right
-   after installing, DCIMDock starts its driver itself.
+   after installing, DCIMDock starts its driver itself (or click *Start the
+   iPhone service*).
 2. Download `DCIMDock-*-windows-x64.exe` from the
    [latest release](https://github.com/TechnikWeber/DCIMDock/releases/latest)
    and run it. One file, no installer, no admin rights.
@@ -197,6 +198,11 @@ The `.exe` is not signed, so Windows SmartScreen may say *Windows protected
 your PC*: click *More info* → *Run anyway*. The terminal mode (`--cli`,
 `--verify`) is not part of the `.exe`; from the source it runs with
 `pip install . pymobiledevice3` and `python -m dcimdock --cli`.
+
+**Updating:** DCIMDock shows a notice when a new release is out. Quit the
+old version (tray icon → *Quit*), download the new `.exe` and start it;
+the old file can be deleted. Settings and the list of saved files stay, and
+the autostart switches to the new file the first time it runs.
 
 ## Good to know
 

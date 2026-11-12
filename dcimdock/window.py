@@ -711,6 +711,9 @@ class MainWindow(QMainWindow):
         self.store_btn = QPushButton(tr("Open Microsoft Store"))
         self.store_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(device.INSTALL_URL)))
         self.store_btn.hide()
+        self.svc_btn = QPushButton(tr("Start the iPhone service"))
+        self.svc_btn.clicked.connect(self.start_service)
+        self.svc_btn.hide()
         self.go_btn = QPushButton(tr("Back up"))
         self.go_btn.setDefault(True)
         self.go_btn.clicked.connect(self.go_or_stop)
@@ -722,6 +725,7 @@ class MainWindow(QMainWindow):
         btns.addWidget(self.update_label)
         btns.addStretch(1)
         btns.addWidget(self.store_btn)
+        btns.addWidget(self.svc_btn)
         btns.addWidget(self.retry_btn)
         btns.addWidget(self.go_btn)
         lay.addLayout(btns)
@@ -756,6 +760,7 @@ class MainWindow(QMainWindow):
         self.act_repair.setEnabled(has_dev)
         self.retry_btn.setVisible(state in ("missing", "error"))
         self.store_btn.setVisible(state == "missing" and bool(device.INSTALL_URL))
+        self.svc_btn.setVisible(state == "missing" and bool(device.INSTALL_URL))
 
     def _show_dest(self):
         self.dest_label.setText(native(self.dest))
@@ -1320,6 +1325,15 @@ class MainWindow(QMainWindow):
             ok, msg = res if res else (False, str(err))
             QMessageBox.information(self, tr("Troubleshooting"), tr("The iPhone service was restarted. Unplug the iPhone and plug it in again.")
                                     if ok else tr("Could not restart the service: {msg}", msg=_short(msg) or "-"))
+        self._fix(device.restart_service, after)
+
+    def start_service(self):
+        """The 'missing' screen on Windows: start Apple's driver, then look again."""
+        def after(res, err):
+            ok, msg = res if res else (False, str(err))
+            if not ok:
+                QMessageBox.warning(self, tr("Start the iPhone service"),
+                                    tr("Could not start the service: {msg}", msg=_short(msg) or "-"))
         self._fix(device.restart_service, after)
 
     def show_diagnosis(self):

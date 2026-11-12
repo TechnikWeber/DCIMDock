@@ -90,3 +90,14 @@ def set_enabled(on: bool) -> None:
         "Icon=dcimdock\n"
         "X-GNOME-Autostart-enabled=true\n"
         "NoDisplay=true\n", "utf-8")
+
+
+def follow() -> None:
+    """After an update the autostart must start the new file, not the old one."""
+    if not (os.environ.get("APPIMAGE") or getattr(sys, "frozen", False)):
+        return      # run from source or a package: the command does not move
+    try:
+        if is_enabled():
+            set_enabled(True)
+    except OSError:
+        pass

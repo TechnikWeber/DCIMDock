@@ -293,7 +293,11 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
+    from . import autostart
     from .window import MainWindow
+
+    if not args.selftest:
+        autostart.follow()
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("dcimdock")

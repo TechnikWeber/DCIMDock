@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.4] - 2026-11-12
+
+* Windows: a *Start the iPhone service* button on the screen that says
+  Apple's driver is missing; it starts the driver and looks again.
+* After an update the autostart starts the new `.exe` or AppImage, not the
+  old file (their names carry the version).
+* README: how to update on Windows.
+
 ## [0.5.3] - 2026-11-12
 
 * Windows: the *Apple Devices* app from the Store has no Windows service;
