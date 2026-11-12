@@ -1175,8 +1175,8 @@ class MainWindow(QMainWindow):
         self.bar.setValue(0)
         self.bar.setFormat("0 %")
         self.detail.setText(tr("Preparing…"))
-        self.worker = SyncThread(self, plan, self.dcim, index,
-                                 self.settings.value("jpeg", False, type=bool) and bool(jpeg.available()))
+        self._copy_jpeg = self.settings.value("jpeg", False, type=bool) and bool(jpeg.available())
+        self.worker = SyncThread(self, plan, self.dcim, index, self._copy_jpeg)
         self.worker.progress.connect(self._progress)
         self.worker.file_done.connect(self._file_done)
         self.worker.result.connect(self._finished)
@@ -1238,15 +1238,10 @@ class MainWindow(QMainWindow):
             parts.append(tr("The iPhone was unplugged during the backup.") if self._gone_during_copy
                          else tr("Stopped after {n} files. Next time it continues where it stopped.",
                                  n=num(res.copied)))
-        else:
-            parts.append(tr("{n} files saved ({size}) in {time}.",
-                            n=num(res.copied), size=size(res.bytes), time=duration(res.seconds)))
         if res.failed:
             lines = "\n".join(f"  {rel}: {why}" for rel, why in res.failed[:8])
             more = "\n  …" if len(res.failed) > 8 else ""
             parts.append(tr("{n} files could not be read:", n=num(len(res.failed))) + "\n" + lines + more)
-        if res.jpegs:
-            parts.append(tr("{n} JPEG copies made.", n=num(res.jpegs)))
         if res.jpeg_failed:
             lines = "\n".join(f"  {rel}: {why}" for rel, why in res.jpeg_failed[:5])
             parts.append(tr("{n} JPEG copies failed (the HEIC files are saved):", n=num(len(res.jpeg_failed)))
@@ -1264,11 +1259,29 @@ class MainWindow(QMainWindow):
             parts.append(tr("DCIMDock does not delete anything on the iPhone. To free up space, delete the photos in the Photos app and empty “Recently Deleted”. With iCloud Photos turned on, this deletes them from iCloud and all your devices too."))
         box = QMessageBox(QMessageBox.Warning if (res.failed or res.cancelled) else QMessageBox.Information,
                           tr("Backup stopped") if res.cancelled else tr("Backup finished"),
-                          "\n\n".join(parts), QMessageBox.Ok, self)
+                          self._overview_html(res, parts), QMessageBox.Ok, self)
+        box.setTextFormat(Qt.RichText)
         open_btn = box.addButton(tr("Open folder"), QMessageBox.ActionRole)
         box.exec()
         if box.clickedButton() is open_btn:
             self.open_dest()
+
+    def _overview_html(self, res: sync.Result, notes: list[str]) -> str:
+        """The numbers as a small table, the notes below it."""
+        from html import escape
+
+        from .app import overview
+        cells = []
+        for label, value in overview(res, self._copy_plan, getattr(self, "_copy_jpeg", False)):
+            part = label.startswith(" ")        # a part of the row above
+            style = "white-space:nowrap;padding-right:24px" + (";padding-left:14px" if part else "")
+            cells.append(f'<tr><td style="{style}">{escape(label.strip())}</td>'
+                         f'<td align="right" style="white-space:nowrap">'
+                         f'{escape(value) if part else "<b>" + escape(value) + "</b>"}</td></tr>')
+        root = str(self._copy_index.root) if self._copy_index else self.dest
+        html = "<table cellspacing=0 cellpadding=1>" + "".join(cells) + "</table>"
+        html += f"<p>{escape(tr('Folder'))}: {escape(native(root))}</p>"
+        return html + "".join("<p>" + escape(p).replace("\n", "<br>") + "</p>" for p in notes)
 
     # ------------------------------------------------------------ more menu
     def full_copy(self):

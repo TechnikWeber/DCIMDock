@@ -63,6 +63,19 @@ class Entry:
 class Task:
     entry: Entry
     dest: str  # relative to the destination root
+    group: str = "image"    # group_kind() of its group: image, video or screenshot
+
+    @property
+    def kind(self) -> str:
+        """For the summary: photo, live (a Live Photo's video), video, screenshot, edit, other."""
+        if is_edit(self.entry.name):
+            return "edit"
+        media = is_media(self.entry.name)
+        if media == "video":
+            return "video" if self.group == "video" else "live"
+        if media == "image":
+            return "screenshot" if self.group == "screenshot" else "photo"
+        return "other"
 
 
 @dataclass
@@ -86,6 +99,8 @@ class Result:
     failed: list[tuple[str, str]] = field(default_factory=list)
     jpegs: int = 0
     jpeg_failed: list[tuple[str, str]] = field(default_factory=list)
+    heic: int = 0           # HEIC copied while JPEG copies were wanted
+    kinds: dict[str, int] = field(default_factory=dict)     # Task.kind -> files copied
     cancelled: bool = False
     seconds: float = 0.0
 
@@ -487,6 +502,7 @@ def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[
                 kind_dir = opts.video_dir if kind == "video" else opts.photo_dir
             base = "/".join(p for p in (opts.device_folder, kind_dir, sub) if p)
 
+        gkind = group_kind(members, meta)
         n = start
         while True:
             targets, adopted, clash = [], [], False
@@ -498,9 +514,9 @@ def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[
                     break
                 state = _same_file(root / rel, e)
                 if state is None:
-                    targets.append(Task(e, rel))
+                    targets.append(Task(e, rel, gkind))
                 elif state:
-                    adopted.append(Task(e, rel))
+                    adopted.append(Task(e, rel, gkind))
                 else:
                     clash = True
                     break
@@ -607,9 +623,11 @@ def run(plan: Plan, dcim, index: Index,
             index.add(task.entry, task.dest, digest)
             res.copied += 1
             res.bytes += task.entry.size
+            res.kinds[task.kind] = res.kinds.get(task.kind, 0) + 1
             unsaved += 1
             file_done(task, dest)
             if jpeg and jpeg_mod.wanted(task.entry.name):
+                res.heic += 1
                 try:
                     if jpeg_mod.convert(dest):
                         res.jpegs += 1

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.9] - 2026-11-12
+
+* **Overview at the end of a backup:** saved now (photos, Live Photo
+  videos, videos, screenshots, edits), JPEG copies as *n of m HEIC*,
+  unreadable files, saved before, already in the folder, not selected,
+  time and folder, as a small table. The terminal prints the same.
+
 ## [0.5.8] - 2026-11-12
 
 * **Order by: Date taken / Date saved** replaces the checkbox *Sort by the

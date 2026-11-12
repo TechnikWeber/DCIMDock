@@ -243,6 +243,18 @@ class TestSync(Fake):
             "Photos/2026/2026-11/IMG_0006.PNG", "Screenshots/2026/2026-11/IMG_0005.PNG",
             "Videos/2026/2026-11/IMG_0007.MOV"])
 
+    def test_result_counts_kinds_for_the_summary(self):
+        self.put("100APPLE/IMG_0005.PNG", (DATA / "screenshot.png").read_bytes())
+        self.put("100APPLE/IMG_0001.HEIC", b"photo")
+        self.put("100APPLE/IMG_0001.MOV", b"live")
+        self.put("100APPLE/IMG_E0001.HEIC", b"edited")
+        self.put("100APPLE/IMG_0001.AAE", b"steps")
+        self.put("100APPLE/IMG_0007.MOV", (DATA / "video.mov").read_bytes())
+        plan = self.plan_with_meta(capture_date=False, screenshot_dir="Screenshots")
+        res = sync.run(plan, self.dcim, sync.Index(self.dest, "UDID"))
+        self.assertEqual(res.kinds, {"screenshot": 1, "photo": 1, "live": 1, "edit": 2, "video": 1})
+        self.assertEqual(res.heic, 0)       # no JPEG wanted
+
     def test_known_files_are_not_read_again(self):
         self.put("100APPLE/IMG_0001.JPG", (DATA / "photo.jpg").read_bytes())
         self.sync()

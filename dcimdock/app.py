@@ -202,8 +202,10 @@ def cli(args) -> int:
             return 130
         if tty:
             print("\r" + " " * 150 + "\r", end="")
-        print(tr("{n} files saved ({size}) in {time}.", n=num(res.copied), size=size(res.bytes),
-                 time=duration(res.seconds)))
+        rows = overview(res, plan, False)
+        width = max(len(label) for label, _ in rows)
+        for label, value in rows:
+            print(f"{label.ljust(width)}  {value}")
         for rel, why in res.failed:
             print(f"  ! {rel}: {why}", file=sys.stderr)
         a, b, k = sync.saved_range(entries, index)
@@ -235,6 +237,31 @@ def verify_cli(args) -> int:
             print(f"  {tr('Changed or damaged:')} {x}")
         bad += len(res.missing) + len(res.changed)
     return 1 if bad else 0
+
+
+def overview(res: sync.Result, plan: sync.Plan | None, jpeg: bool) -> list[tuple[str, str]]:
+    """The summary after a backup as (label, value) rows; an indented label is a part of the one above."""
+    from .i18n import duration, num, size, tr
+    rows = [(tr("Saved now"), f"{num(res.copied)} ({size(res.bytes)})")]
+    for key, label in (("photo", tr("Photos")), ("live", tr("Live Photo videos")), ("video", tr("Videos")),
+                       ("screenshot", tr("Screenshots")), ("edit", tr("Edits")), ("other", tr("Other files"))):
+        if res.kinds.get(key):
+            rows.append(("    " + label, num(res.kinds[key])))
+    if jpeg and res.heic:
+        rows.append((tr("JPEG copies"), tr("{n} of {m} HEIC", n=num(res.jpegs), m=num(res.heic))))
+    if res.failed:
+        rows.append((tr("Could not be read"), num(len(res.failed))))
+    if res.jpeg_failed:
+        rows.append((tr("JPEG failed"), num(len(res.jpeg_failed))))
+    if plan is not None:
+        if plan.known:
+            rows.append((tr("Saved before (left alone)"), num(plan.known)))
+        if plan.adopted:
+            rows.append((tr("Already in the folder (taken over)"), num(len(plan.adopted))))
+        if plan.skipped:
+            rows.append((tr("Not selected"), num(plan.skipped)))
+    rows.append((tr("Time"), duration(res.seconds)))
+    return rows
 
 
 def main(argv: list[str] | None = None) -> int:
