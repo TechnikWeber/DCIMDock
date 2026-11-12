@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from . import jpeg as jpeg_mod
 from . import meta as metadata
 
 CHUNK = 1 << 20          # 1 MiB reads: few round trips over AFC, low memory
@@ -83,6 +84,8 @@ class Result:
     copied: int = 0
     bytes: int = 0
     failed: list[tuple[str, str]] = field(default_factory=list)
+    jpegs: int = 0
+    jpeg_failed: list[tuple[str, str]] = field(default_factory=list)
     cancelled: bool = False
     seconds: float = 0.0
 
@@ -172,6 +175,7 @@ class Options:
     screenshot_dir: str = ""   # screenshots into their own folder, "" for no
     capture_date: bool = True  # folders by EXIF capture date instead of file date
     selection: Selection = field(default_factory=Selection)
+    rename: bool = False       # 2026-11-03_14-22-05_IMG_0001.HEIC: sorts by time everywhere
 
 
 def is_media(name: str) -> str:
@@ -187,6 +191,12 @@ def group_key(name: str) -> str:
     """IMG_E0042.HEIC, IMG_O0042.AAE, IMG_0042.MOV -> IMG_0042."""
     stem = os.path.splitext(name)[0]
     return _EDIT_PREFIX.sub(r"\1\2", stem).upper()
+
+
+def time_prefix(t: float) -> str:
+    """The prefix for Options.rename. The whole group gets the same one, so a
+    Live Photo's HEIC and MOV still sit side by side."""
+    return time.strftime("%Y-%m-%d_%H-%M-%S_", time.localtime(t))
 
 
 def with_suffix(name: str, n: int) -> str:
@@ -422,15 +432,20 @@ def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[
                 continue
 
         start = 0
+        prefix = ""
         if prev_dest and prev_entry:
             # a file joined a group that was saved earlier (e.g. a new .AAE):
-            # put it next to its siblings with the same suffix
+            # put it next to its siblings with the same prefix and suffix
             base = prev_dest.rsplit("/", 1)[0] if "/" in prev_dest else ""
             got = os.path.splitext(prev_dest.rsplit("/", 1)[-1])[0]
             orig = os.path.splitext(prev_entry.name)[0]
-            m = _SUFFIX.match(got[len(orig):]) if got.startswith(orig) else None
+            pos = got.find(orig)
+            m = _SUFFIX.match(got[pos + len(orig):]) if pos >= 0 else None
             start = int(m.group(1)) if m else 0
+            prefix = got[:pos] if pos > 0 else ""
         else:
+            if opts.rename:
+                prefix = time_prefix(group_time(members, meta, opts.capture_date))
             sub = layout_dir(opts.layout, group_time(members, meta, opts.capture_date), folder)
             kind = group_kind(members, meta)
             kind_dir = ""
@@ -444,7 +459,8 @@ def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[
         while True:
             targets, adopted, clash = [], [], False
             for e in new:
-                rel = f"{base}/{with_suffix(e.name, n)}" if base else with_suffix(e.name, n)
+                name = prefix + with_suffix(e.name, n)
+                rel = f"{base}/{name}" if base else name
                 if rel in reserved:
                     clash = True
                     break
@@ -525,8 +541,9 @@ def copy_one(src, dest: Path, e: Entry, progress: Callable[[int], None],
 def run(plan: Plan, dcim, index: Index,
         progress: Callable[[int, int, Task], None] = lambda done, i, t: None,
         file_done: Callable[[Task, Path], None] = lambda t, p: None,
-        cancel: Callable[[], bool] = lambda: False) -> Result:
-    """Copy plan.tasks. progress(bytes_done_total, task_number, task)."""
+        cancel: Callable[[], bool] = lambda: False, jpeg: bool = False) -> Result:
+    """Copy plan.tasks. progress(bytes_done_total, task_number, task).
+    jpeg: also write NAME.jpg next to every HEIC copied (see jpeg.py)."""
     res = Result()
     src = as_source(dcim)
     t0 = time.monotonic()
@@ -560,6 +577,12 @@ def run(plan: Plan, dcim, index: Index,
             res.bytes += task.entry.size
             unsaved += 1
             file_done(task, dest)
+            if jpeg and jpeg_mod.wanted(task.entry.name):
+                try:
+                    if jpeg_mod.convert(dest):
+                        res.jpegs += 1
+                except OSError as exc:
+                    res.jpeg_failed.append((task.dest, str(exc)))
             if unsaved >= 25 or time.monotonic() - last_save > 5:
                 index.save()
                 unsaved, last_save = 0, time.monotonic()

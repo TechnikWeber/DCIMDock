@@ -347,3 +347,56 @@ class TestSelection(Fake):
         self.assertTrue(sync.is_edit("IMG_0001.AAE"))
         self.assertFalse(sync.is_edit("IMG_0001.HEIC"))
         self.assertFalse(sync.is_edit("IMG_EDIT.JPG"))
+
+
+class TestRename(Fake):
+    def run_once(self, **kw):
+        entries = sync.scan(self.dcim)
+        index = sync.Index(self.dest, "UDID")
+        opts = sync.Options("ym", "", capture_date=False, rename=True)
+        plan = sync.make_plan(entries, index, opts)
+        res = sync.run(plan, self.dcim, index, **kw)
+        return plan, res
+
+    def test_prefix_for_the_whole_group(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"a", NOV)
+        self.put("100APPLE/IMG_0001.MOV", b"m", NOV + 1)
+        self.run_once()
+        self.assertEqual(self.files(), ["2026/2026-11/2026-11-03_12-00-00_IMG_0001.HEIC",
+                                        "2026/2026-11/2026-11-03_12-00-00_IMG_0001.MOV"])
+
+    def test_late_member_joins_with_same_prefix(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"a", NOV)
+        self.run_once()
+        self.put("100APPLE/IMG_O0001.AAE", b"edit", NOV + 600)
+        plan, _ = self.run_once()
+        self.assertEqual([t.dest for t in plan.tasks], ["2026/2026-11/2026-11-03_12-00-00_IMG_O0001.AAE"])
+
+    def test_clash_gets_suffix(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"a", NOV)
+        self.run_once()
+        # the iPhone starts again at IMG_0001 with a different photo at the same second
+        (self.dcim / "100APPLE/IMG_0001.HEIC").write_bytes(b"other")
+        os.utime(self.dcim / "100APPLE/IMG_0001.HEIC", (NOV, NOV))
+        sync.Index(self.dest, "UDID").path.unlink()
+        self.run_once()
+        self.assertIn("2026/2026-11/2026-11-03_12-00-00_IMG_0001_1.HEIC", self.files())
+
+
+class TestJpeg(Fake):
+    def test_jpeg_next_to_heic(self):
+        from dcimdock import jpeg
+        if not jpeg.available():
+            self.skipTest("no HEIC converter")
+        self.put("100APPLE/IMG_0001.HEIC", (DATA / "photo.heic").read_bytes())
+        self.put("100APPLE/IMG_0002.JPG", b"j")
+        entries = sync.scan(self.dcim)
+        index = sync.Index(self.dest, "UDID")
+        plan = sync.make_plan(entries, index, sync.Options("flat", "", capture_date=False))
+        res = sync.run(plan, self.dcim, index, jpeg=True)
+        self.assertEqual((res.jpegs, res.jpeg_failed), (1, []))
+        self.assertEqual(self.files(), ["IMG_0001.HEIC", "IMG_0001.jpg", "IMG_0002.JPG"])
+        out = self.dest / "IMG_0001.jpg"
+        self.assertEqual(out.read_bytes()[:2], b"\xff\xd8")
+        self.assertAlmostEqual(out.stat().st_mtime, NOV, delta=1)
+        self.assertIsNone(jpeg.convert(self.dest / "IMG_0001.HEIC"))   # never overwrites

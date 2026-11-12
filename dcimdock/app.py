@@ -248,6 +248,8 @@ def main(argv: list[str] | None = None) -> int:
     sel.add_argument("--no-live", action="store_true", help="without the video of Live Photos")
     sel.add_argument("--no-edits", action="store_true", help="without edited versions (IMG_E…) and .AAE files")
     parser.add_argument("--selftest", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--background", action="store_true",
+                        help="start with only the tray icon (used by the autostart)")
     args = parser.parse_args(argv)
 
     if args.verify:
@@ -269,8 +271,12 @@ def main(argv: list[str] | None = None) -> int:
     app.setDesktopFileName("dcimdock")
     app.setApplicationVersion(__version__)
     _icon_theme_fallback()
-    win = MainWindow(source=args.source, selftest=args.selftest)
-    win.show()
+    app.setQuitOnLastWindowClosed(False)    # the tray icon may keep it running
+    win = MainWindow(source=args.source, selftest=args.selftest, background=args.background)
+    if args.background and win.tray:
+        pass        # only the tray icon; the window opens from there
+    else:
+        win.show()
     if args.selftest:
         def report():
             ok = not win.windowIcon().isNull()
@@ -281,8 +287,10 @@ def main(argv: list[str] | None = None) -> int:
                     backend = device.selfcheck()
                 except Exception as exc:   # noqa: BLE001
                     backend, ok = f"afc BROKEN: {exc!r}", False
+            from . import jpeg
             line = (f"selftest {'ok' if ok else 'FAILED'}: dcimdock {__version__}, Qt window built, "
-                    f"icon {'ok' if not win.windowIcon().isNull() else 'MISSING'}, {backend}")
+                    f"icon {'ok' if not win.windowIcon().isNull() else 'MISSING'}, {backend}, "
+                    f"jpeg {jpeg.available() or '-'}")
             print(line)
             log = os.environ.get("DCIMDOCK_SELFTEST_LOG")   # the windowed .exe has no stdout
             if log:

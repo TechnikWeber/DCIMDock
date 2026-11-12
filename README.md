@@ -68,6 +68,18 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
   *not selected* and is copied on a later run without the selection.
   *Copy everything again* uses the selection too and names the new folder
   after it (`Selection 2025-01-01 to 2025-12-31 (2026-11-12 18-00)`).
+* **Automatic backup** (*More → Settings*): plug the iPhone in and DCIMDock
+  backs it up in the background, with a notification when it is done.
+  Closing the window keeps it running as a tray icon; optionally it starts
+  there when you log in.
+* **Name files by the time they were taken** (optional):
+  `2026-11-03_14-22-05_IMG_0001.HEIC`, so every program sorts them by time.
+  The whole group (Live Photo, edits) gets the same name.
+* **A JPEG next to every HEIC** (optional): `IMG_0001.HEIC` stays,
+  `IMG_0001.jpg` is added for programs that cannot open HEIC. Capture date
+  and GPS go along. Built into the AppImage and the `.exe`; the RPM uses
+  `heif-dec` from `libheif-tools`.
+* Tells you when a new version is out (once a day, can be switched off).
 * Checks the free space before it starts.
 * Progress bar with speed and time left. The **preview** of the photo just
   copied is decoded at reduced size in its own thread, at most about twice a

@@ -15,7 +15,7 @@ jobs:
           python-version: "3.12"
       - name: Tests
         run: |
-          pip install -q "pymobiledevice3>=9,<12"
+          pip install -q "pymobiledevice3>=9,<12" "pillow-heif>=0.18,<2"
           python -m unittest discover -s tests -t . -v
       - name: ShellCheck
         run: shellcheck bin/dcimdock install.sh uninstall.sh packaging/appimage/build.sh packaging/rpm/build.sh

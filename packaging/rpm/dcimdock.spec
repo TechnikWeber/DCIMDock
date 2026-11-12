@@ -1,5 +1,5 @@
 Name:           dcimdock
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Copy the photos and videos from an iPhone to this computer
 License:        MIT
@@ -15,6 +15,7 @@ Requires:       libimobiledevice-utils
 Requires:       usbmuxd
 # HEIC previews
 Recommends:     kf6-kimageformats
+Recommends:     libheif-tools
 
 %description
 A small window that copies the camera roll of an iPhone over USB: only new
@@ -53,6 +54,9 @@ install -Dm644 share/io.github.technikweber.dcimdock.metainfo.xml \
 %{_metainfodir}/io.github.technikweber.dcimdock.metainfo.xml
 
 %changelog
+* Thu Nov 12 2026 Philipp Weber - 0.4.0-1
+- Automatic backup, rename by capture time, JPEG next to HEIC, update notice
+
 * Thu Nov 12 2026 Philipp Weber - 0.3.0-1
 - Choose what to copy: period, kinds, Live Photo videos, edits
 

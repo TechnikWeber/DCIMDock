@@ -8,14 +8,14 @@ from pathlib import Path
 
 from PySide6.QtCore import (QDate, QDir, QObject, QRunnable, QSettings, QSize, QStandardPaths, Qt, QThread,
                             QThreadPool, QTimer, QUrl, Signal)
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QImageReader, QPixmap
+from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
-    QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QSystemTrayIcon, QProgressBar, QPushButton,
     QSizePolicy, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import sync
+from . import autostart, jpeg, sync, update
 from .backend import device
 from .i18n import date, duration, num, size, tr
 from .icon import app_icon
@@ -67,9 +67,9 @@ class SyncThread(QThread):
     file_done = Signal(str)
     result = Signal(object)
 
-    def __init__(self, parent, plan, dcim, index):
+    def __init__(self, parent, plan, dcim, index, jpeg=False):
         super().__init__(parent)
-        self.plan, self.dcim, self.index = plan, dcim, index
+        self.plan, self.dcim, self.index, self.jpeg = plan, dcim, index, jpeg
         self.stop = threading.Event()
         self._last = 0.0
 
@@ -81,7 +81,7 @@ class SyncThread(QThread):
 
     def run(self):
         res = sync.run(self.plan, self.dcim, self.index, self._progress,
-                       lambda t, p: self.file_done.emit(str(p)), self.stop.is_set)
+                       lambda t, p: self.file_done.emit(str(p)), self.stop.is_set, self.jpeg)
         self.result.emit(res)
 
 
@@ -318,6 +318,92 @@ class SelectionDialog(QDialog):
         self.accept()
 
 
+class SettingsDialog(QDialog):
+    """Options that are set once and then left alone."""
+
+    def __init__(self, parent, settings: QSettings):
+        super().__init__(parent)
+        self.settings = settings
+        self.setWindowTitle(tr("Settings"))
+        lay = QVBoxLayout(self)
+
+        files = QGroupBox(tr("Files"))
+        col = QVBoxLayout(files)
+        self.rename = QCheckBox(tr("Name files by the time they were taken"))
+        self.rename.setToolTip(tr("2026-11-03_14-22-05_IMG_0001.HEIC instead of IMG_0001.HEIC: every program sorts them by time, and a new IMG_0001 never meets an old one."))
+        col.addWidget(self.rename)
+        col.addWidget(self._hint(tr("Example: 2026-11-03_14-22-05_IMG_0001.HEIC")))
+        self.jpeg = QCheckBox(tr("Also save a JPEG next to every HEIC photo"))
+        self.jpeg.setToolTip(tr("IMG_0001.HEIC stays as it is, IMG_0001.jpg is added for programs that cannot open HEIC."))
+        col.addWidget(self.jpeg)
+        how = jpeg.available()
+        if not how:
+            self.jpeg.setEnabled(False)
+            col.addWidget(self._hint(tr("Needs a HEIC converter: {cmd}", cmd=jpeg.install_hint())))
+        lay.addWidget(files)
+
+        auto = QGroupBox(tr("Automatic"))
+        col = QVBoxLayout(auto)
+        self.auto = QCheckBox(tr("Back up automatically when an iPhone is plugged in"))
+        self.auto.setToolTip(tr("Uses the folder, the folders and the selection set in the window. Closing the window keeps DCIMDock running next to the clock."))
+        col.addWidget(self.auto)
+        self.login = QCheckBox(tr("Start in the background when I log in"))
+        col.addWidget(self.login)
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            col.addWidget(self._hint(tr("This desktop shows no tray icons: DCIMDock then only works while its window is open.")))
+        lay.addWidget(auto)
+
+        other = QGroupBox(tr("Other"))
+        col = QVBoxLayout(other)
+        self.updates = QCheckBox(tr("Check for new versions (once a day, asks GitHub)"))
+        col.addWidget(self.updates)
+        lay.addWidget(other)
+        self.extra = QVBoxLayout()
+        lay.addLayout(self.extra)
+
+        self.rename.setChecked(settings.value("rename", False, type=bool))
+        self.jpeg.setChecked(bool(how) and settings.value("jpeg", False, type=bool))
+        self.auto.setChecked(settings.value("auto_backup", False, type=bool))
+        self.login.setChecked(autostart.is_enabled())
+        self.updates.setChecked(settings.value("check_updates", True, type=bool))
+        self.auto.toggled.connect(self._auto_toggled)
+        self.login.setEnabled(self.auto.isChecked())
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("Cancel"))
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def _auto_toggled(self, on: bool):
+        self.login.setEnabled(on)
+        if not on:
+            self.login.setChecked(False)
+
+    @staticmethod
+    def _hint(text: str) -> QLabel:
+        lab = QLabel(text)
+        lab.setWordWrap(True)
+        lab.setContentsMargins(24, 0, 0, 0)
+        lab.setStyleSheet("color: palette(placeholder-text);")
+        lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return lab
+
+    def _accept(self):
+        s = self.settings
+        s.setValue("rename", self.rename.isChecked())
+        s.setValue("jpeg", self.jpeg.isChecked())
+        s.setValue("auto_backup", self.auto.isChecked())
+        s.setValue("check_updates", self.updates.isChecked())
+        want = self.login.isChecked()
+        if want != autostart.is_enabled():
+            try:
+                autostart.set_enabled(want)
+            except OSError as exc:
+                QMessageBox.warning(self, tr("Settings"), tr("Could not change the autostart: {msg}", msg=str(exc)))
+        self.accept()
+
+
 def native(path: str) -> str:
     return QDir.toNativeSeparators(path)
 
@@ -328,7 +414,7 @@ def default_dest() -> str:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, source: str | None = None, selftest: bool = False):
+    def __init__(self, source: str | None = None, selftest: bool = False, background: bool = False):
         super().__init__()
         self.setWindowTitle("DCIMDock")
         self.setWindowIcon(app_icon())
@@ -358,6 +444,13 @@ class MainWindow(QMainWindow):
         self.meta_sig = _MetaProgress()
         self.meta_sig.step.connect(self._meta_step)
         self._gone_during_copy = False
+        self.background = background
+        self.tray: QSystemTrayIcon | None = None
+        self._really_quit = False
+        self._auto_run = False                # the running copy was started automatically
+        self._auto_done: set[str] = set()     # udids backed up automatically since plugged in
+        self._told: set[tuple[str, str]] = set()   # (udid, state) already shown as a tray message
+        self._update: tuple[str, str] | None = None
 
         self._build()
         device.cleanup_stale()
@@ -372,9 +465,12 @@ class MainWindow(QMainWindow):
         self._preview_busy = False
         self._preview_shown = ""
 
+        self._setup_tray()
         QTimer.singleShot(0, self.start)
-        if not selftest and not self.settings.value("hide_intro", False, type=bool):
+        if not selftest and not background and not self.settings.value("hide_intro", False, type=bool):
             QTimer.singleShot(300, lambda: self.show_intro(True))
+        if not selftest and not source:
+            QTimer.singleShot(4000, self._check_update)
 
     # ------------------------------------------------------------ layout
     def _build(self):
@@ -529,6 +625,7 @@ class MainWindow(QMainWindow):
         self.act_full.setToolTip(tr("Uses the selection, if one is set."))
         self.act_verify = menu.addAction(tr("Check the backup…"), self.verify)
         menu.addSeparator()
+        menu.addAction(tr("Settings…"), self.show_settings)
         fix = menu.addMenu(tr("Troubleshooting"))
         self.act_release = fix.addAction(tr("Release stuck iPhone folders"), self.fix_mounts)
         self.act_release.setVisible(device.HAS_MOUNTS)
@@ -545,6 +642,10 @@ class MainWindow(QMainWindow):
         self.go_btn.clicked.connect(self.go_or_stop)
         btns.addWidget(self.open_btn)
         btns.addWidget(self.more_btn)
+        self.update_label = QLabel()
+        self.update_label.setOpenExternalLinks(True)
+        self.update_label.hide()
+        btns.addWidget(self.update_label)
         btns.addStretch(1)
         btns.addWidget(self.retry_btn)
         btns.addWidget(self.go_btn)
@@ -591,7 +692,8 @@ class MainWindow(QMainWindow):
         photos, videos = (tr("Photos"), tr("Videos")) if self.split.isChecked() else ("", "")
         shots = tr("Screenshots") if self.shots_box.isChecked() else ""
         return sync.Options(self.layout_box.currentData(), folder, photos, videos, shots,
-                            self.capture_box.isChecked(), self.choice.selection())
+                            self.capture_box.isChecked(), self.choice.selection(),
+                            self.settings.value("rename", False, type=bool))
 
     def _dates_matter(self) -> bool:
         sel = self.choice.selection()
@@ -618,7 +720,8 @@ class MainWindow(QMainWindow):
     def _show_example(self):
         o = self._options()
         t = time.mktime((2026, 11, 3, 14, 0, 0, 0, 0, -1))
-        parts = [o.device_folder, o.photo_dir or o.screenshot_dir and "", sync.layout_dir(o.layout, t, "100APPLE"), "IMG_0001.HEIC"]
+        name = (sync.time_prefix(t) if o.rename else "") + "IMG_0001.HEIC"
+        parts = [o.device_folder, o.photo_dir or o.screenshot_dir and "", sync.layout_dir(o.layout, t, "100APPLE"), name]
         self.example.setText(tr("Example") + ": " + os.sep.join(p.replace("/", os.sep) for p in parts if p))
 
     # ------------------------------------------------------------ start / polling
@@ -667,6 +770,9 @@ class MainWindow(QMainWindow):
             self._connect()
 
     def _update_devices(self, ids):
+        # unplugged: the next time it is plugged in counts as new
+        self._auto_done &= set(ids)
+        self._told = {k for k in self._told if k[0] in ids}
         for gone in [u for u in self.devices if u not in ids]:
             del self.devices[gone]
         for udid in ids:
@@ -765,8 +871,10 @@ class MainWindow(QMainWindow):
             self._scan()
         elif state == "locked":
             self._set_state("locked", tr("Unlock your iPhone."))
+            self._tell("locked", tr("Unlock your iPhone."))
         elif state == "trust":
             self._set_state("trust", tr("Unlock your iPhone and tap “Trust”, then enter your passcode."))
+            self._tell("trust", tr("Unlock your iPhone and tap “Trust”, then enter your passcode."))
         elif state == "denied":
             self._set_state("denied", tr("You tapped “Don’t Trust”. Unplug the iPhone and plug it in again."))
         elif state == "nophotos":
@@ -854,6 +962,13 @@ class MainWindow(QMainWindow):
         self._set_state("ready", tr("Ready.") if not self.source else str(self.dcim))
         if p.tasks and not sync.free_space_ok(Path(self.dest), p.bytes)[0]:
             self.go_btn.setEnabled(False)
+            self._tell("space", tr("Not enough free space in the backup folder."))
+            return
+        if (p.tasks and not self.source and self.settings.value("auto_backup", False, type=bool)
+                and self.dev.udid not in self._auto_done and not self.worker):
+            self._auto_done.add(self.dev.udid)
+            self._auto_run = True
+            self._start_copy(p, self.index)
 
     def _options_changed(self, *_):
         self.settings.setValue("layout", self.layout_box.currentData())
@@ -899,11 +1014,14 @@ class MainWindow(QMainWindow):
         self.bar.setValue(0)
         self.bar.setFormat("0 %")
         self.detail.setText(tr("Preparing…"))
-        self.worker = SyncThread(self, plan, self.dcim, index)
+        self.worker = SyncThread(self, plan, self.dcim, index,
+                                 bool(jpeg.available()) and self.settings.value("jpeg", False, type=bool))
         self.worker.progress.connect(self._progress)
         self.worker.file_done.connect(self._file_done)
         self.worker.result.connect(self._finished)
         self._set_state("copying", tr("Backing up – keep the iPhone connected and unlocked."))
+        if self.tray:
+            self.tray.setToolTip("DCIMDock – " + tr("Backing up {n} files…", n=num(self.count)))
         if self.preview_box.isChecked():
             self.preview_timer.start()
         self.worker.start()
@@ -935,6 +1053,7 @@ class MainWindow(QMainWindow):
         self.preview_timer.stop()
         self._preview_tick()
         if self._quit_after_stop:
+            self._really_quit = True
             self.close()
             return
         frac = 1.0 if not res.cancelled else (self.bar.value() / 1000)
@@ -947,6 +1066,12 @@ class MainWindow(QMainWindow):
             self._replan()
 
     def _report(self, res: sync.Result):
+        auto, self._auto_run = self._auto_run, False
+        if self.tray:
+            self.tray.setToolTip("DCIMDock")
+        if self.tray and (auto or not self.isVisible()) and not self.isActiveWindow():
+            self._tray_report(res)
+            return
         parts = []
         if res.cancelled:
             parts.append(tr("The iPhone was unplugged during the backup.") if self._gone_during_copy
@@ -959,6 +1084,12 @@ class MainWindow(QMainWindow):
             lines = "\n".join(f"  {rel}: {why}" for rel, why in res.failed[:8])
             more = "\n  …" if len(res.failed) > 8 else ""
             parts.append(tr("{n} files could not be read:", n=num(len(res.failed))) + "\n" + lines + more)
+        if res.jpegs:
+            parts.append(tr("{n} JPEG copies made.", n=num(res.jpegs)))
+        if res.jpeg_failed:
+            lines = "\n".join(f"  {rel}: {why}" for rel, why in res.jpeg_failed[:5])
+            parts.append(tr("{n} JPEG copies failed (the HEIC files are saved):", n=num(len(res.jpeg_failed)))
+                         + "\n" + lines)
         if self.entries and self._copy_index:
             a, b, k = sync.saved_range(self.entries, self._copy_index)
             if a is not None:
@@ -1139,7 +1270,114 @@ class MainWindow(QMainWindow):
         if first and dlg.hide_box.isChecked():
             self.settings.setValue("hide_intro", True)
 
+    # ------------------------------------------------------------ background
+    def _setup_tray(self):
+        want = self.background or self.settings.value("auto_backup", False, type=bool)
+        if not want or not QSystemTrayIcon.isSystemTrayAvailable():
+            if self.tray:
+                self.tray.hide()
+                self.tray.deleteLater()
+                self.tray = None
+            return
+        if self.tray:
+            return
+        self.tray = QSystemTrayIcon(app_icon(), self)
+        self.tray.setToolTip("DCIMDock")
+        menu = QMenu(self)
+        menu.addAction(tr("Open DCIMDock"), self.show_window)
+        menu.addAction(tr("Open folder"), self.open_dest)
+        menu.addSeparator()
+        quit_act = QAction(tr("Quit"), menu)
+        quit_act.triggered.connect(self.quit_all)
+        menu.addAction(quit_act)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(
+            lambda r: self.show_window() if r in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
+        self.tray.messageClicked.connect(self.show_window)
+        self.tray.show()
+
+    def show_window(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def quit_all(self):
+        self._really_quit = True
+        if self.worker:
+            self.show_window()
+        self.close()
+
+    def _tell(self, state: str, text: str):
+        """A tray message while the window is hidden, once per iPhone and state."""
+        if not self.tray or self.isVisible() or not self.dev:
+            return
+        key = (self.dev.udid, state)
+        if key in self._told:
+            return
+        self._told.add(key)
+        self.tray.showMessage("DCIMDock", text, QSystemTrayIcon.Information, 8000)
+
+    def _tray_report(self, res: sync.Result):
+        icon = QSystemTrayIcon.Information
+        if res.cancelled:
+            text = (tr("The iPhone was unplugged during the backup.") if self._gone_during_copy
+                    else tr("Stopped after {n} files. Next time it continues where it stopped.", n=num(res.copied)))
+            icon = QSystemTrayIcon.Warning
+        else:
+            text = tr("{n} files saved ({size}) in {time}.", n=num(res.copied), size=size(res.bytes),
+                      time=duration(res.seconds))
+        if res.failed or res.jpeg_failed:
+            text += " " + tr("{n} with problems – open DCIMDock for details.",
+                             n=num(len(res.failed) + len(res.jpeg_failed)))
+            icon = QSystemTrayIcon.Warning
+            self.status.setText(text)
+        self.tray.showMessage("DCIMDock", text, icon, 10000)
+
+    def show_settings(self):
+        if self.worker:
+            return
+        dlg = SettingsDialog(self, self.settings)
+        if dlg.exec() == QDialog.Accepted:
+            self._setup_tray()
+            self._show_example()
+            self._replan()
+
+    def _check_update(self):
+        if not self.settings.value("check_updates", True, type=bool):
+            return
+        last = self.settings.value("update_checked", 0.0, type=float)
+        if time.time() - last < 86400:
+            seen = self.settings.value("update_seen", "")
+            if seen and update.newer(seen):
+                self._show_update((seen, update.PAGE))
+            return
+
+        def done(res, err):
+            self.settings.setValue("update_checked", time.time())
+            if res:
+                self.settings.setValue("update_seen", res[0])
+                self._show_update(res)
+        self._call(update.check, done)
+
+    def _show_update(self, res):
+        self._update = res
+        v, page = res
+        self.update_label.setText(f'<a href="{page}">' + tr("Version {v} is available", v=v) + "</a>")
+        self.update_label.show()
+        if self.tray and not self.isVisible():
+            self.tray.showMessage("DCIMDock", tr("Version {v} is available", v=v), QSystemTrayIcon.Information, 8000)
+
     def closeEvent(self, ev):
+        if (self.tray and not self._really_quit and not self.selftest
+                and self.settings.value("auto_backup", False, type=bool)):
+            # keep watching for the iPhone next to the clock
+            self.hide()
+            if not self.settings.value("told_tray", False, type=bool):
+                self.settings.setValue("told_tray", True)
+                self.tray.showMessage("DCIMDock", tr("DCIMDock keeps running here and backs up the iPhone when it is plugged in. Quit from this icon's menu."),
+                                      QSystemTrayIcon.Information, 10000)
+            ev.ignore()
+            return
         if self.worker:
             ask = QMessageBox(QMessageBox.Question, "DCIMDock", tr("A backup is running. Stop it and quit?"),
                               QMessageBox.NoButton, self)
@@ -1158,7 +1396,15 @@ class MainWindow(QMainWindow):
             c.wait(3000)
         if self.mount:
             device.unmount(self.mount)
+        if self.tray:
+            self.tray.hide()
         super().closeEvent(ev)
+        QTimer.singleShot(0, QApplication_quit)
+
+
+def QApplication_quit():
+    from PySide6.QtWidgets import QApplication
+    QApplication.quit()
 
 
 def QApplication_alert(win):

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0] - 2026-11-12
+
+* **Automatic backup** when an iPhone is plugged in, in the background with
+  a notification at the end. Tray icon; the window closes to it. Optional
+  autostart at login (`--background`; Linux `~/.config/autostart`,
+  Windows the Run key of the user).
+* **Name files by capture time** (optional):
+  `2026-11-03_14-22-05_IMG_0001.HEIC`, the same prefix for a whole group.
+* **JPEG next to HEIC** (optional): `IMG_0001.jpg` beside the untouched
+  original, EXIF kept, orientation fixed. pillow-heif in the AppImage and
+  the `.exe`, `heif-dec` (libheif-tools) for the RPM.
+* Settings dialog (*More → Settings*).
+* Notice when a new release is out (GitHub, at most once a day, can be
+  switched off).
+
 ## [0.3.0] - 2026-11-12
 
 * **Choose what to copy:** a period (last 7/30/90 days, this year, last
