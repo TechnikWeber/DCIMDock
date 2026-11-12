@@ -380,6 +380,10 @@ class AfcSource:
     def open_file(self, rel: str) -> io.BufferedReader:
         return io.BufferedReader(AfcFile(self._afc, f"{DCIM}/{rel}"), buffer_size=64 * 1024)
 
+    def open_root(self, rel: str) -> io.BufferedReader:
+        """A file next to DCIM, e.g. PhotoData/Photos.sqlite."""
+        return io.BufferedReader(AfcFile(self._afc, f"/{rel}"), buffer_size=1024 * 1024)
+
     async def aclose(self):
         for c in (self._afc.aclose, self._lockdown.close):
             try:

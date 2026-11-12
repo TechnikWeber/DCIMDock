@@ -11,11 +11,13 @@ from PySide6.QtCore import (QDate, QDir, QObject, QRunnable, QSettings, QSize, Q
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
-    QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QSystemTrayIcon, QProgressBar, QPushButton,
+    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QSystemTrayIcon, QProgressBar, QPushButton,
     QSizePolicy, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import autostart, jpeg, sync, update
+import tempfile
+
+from . import autostart, jpeg, library, sync, update
 from .backend import device
 from .i18n import date, duration, num, size, tr
 from .icon import app_icon
@@ -169,6 +171,7 @@ class SelectionChoice:
     "last 30 days" stays relative to today."""
 
     KINDS = ("photos", "videos", "screenshots", "live", "edits")
+    BETA = {"skip_trashed": True, "skip_hidden": False, "favorites_only": False}
 
     def __init__(self, settings: QSettings | None = None):
         self.preset = "all"
@@ -176,7 +179,15 @@ class SelectionChoice:
         self.first = today.addMonths(-1)
         self.last = today
         self.flags = {k: True for k in self.KINDS}
+        self.beta = False
+        self.beta_flags = dict(self.BETA)
+        self.albums: set[str] = set()
         if settings is not None:
+            self.beta = settings.value("beta", False, type=bool)
+            for k, default in self.BETA.items():
+                self.beta_flags[k] = settings.value(f"sel_{k}", default, type=bool)
+            raw = settings.value("sel_albums", [])
+            self.albums = set([raw] if isinstance(raw, str) and raw else raw or [])
             self.preset = settings.value("sel_preset", "all")
             if self.preset not in sync.PRESETS:
                 self.preset = "all"
@@ -193,15 +204,20 @@ class SelectionChoice:
         settings.setValue("sel_to", self.last.toString(Qt.ISODate))
         for k in self.KINDS:
             settings.setValue(f"sel_{k}", self.flags[k])
+        for k in self.BETA:
+            settings.setValue(f"sel_{k}", self.beta_flags[k])
+        settings.setValue("sel_albums", sorted(self.albums))
 
     def selection(self) -> sync.Selection:
         a, b = sync.date_range(self.preset, custom=(_qdate_time(self.first), _qdate_time(self.last)))
-        return sync.Selection(a, b, **self.flags)
+        extra = dict(self.beta_flags, albums=frozenset(self.albums)) if self.beta else {}
+        return sync.Selection(a, b, **self.flags, **extra)
 
     def describe(self) -> str:
         sel = self.selection()
+        tail = " " + tr("(without “Recently Deleted”)") if sel.skip_trashed else ""
         if not sel.active:
-            return tr("Everything")
+            return tr("Everything") + tail
         bits = []
         if self.preset == "custom":
             bits.append(f"{date(_qdate_time(self.first))} – {date(_qdate_time(self.last))}")
@@ -215,7 +231,13 @@ class SelectionChoice:
             bits.append(tr("without Live Photo videos"))
         if not self.flags["edits"]:
             bits.append(tr("without edits"))
-        return " · ".join(bits)
+        if sel.skip_hidden:
+            bits.append(tr("without hidden"))
+        if sel.favorites_only:
+            bits.append(tr("only favorites"))
+        if sel.albums:
+            bits.append(tr("albums: {names}", names=", ".join(sorted(sel.albums, key=str.casefold))))
+        return " · ".join(bits) + tail
 
     def folder_label(self) -> str:
         """Part of the folder name for "copy the selection into a new folder"."""
@@ -228,9 +250,10 @@ class SelectionChoice:
 
 
 class SelectionDialog(QDialog):
-    def __init__(self, parent, choice: SelectionChoice, capture_date: bool):
+    def __init__(self, parent, choice: SelectionChoice, capture_date: bool, albums=None):
         super().__init__(parent)
         self.setWindowTitle(tr("What to copy"))
+        self.beta = choice.beta
         lay = QVBoxLayout(self)
 
         when = QGroupBox(tr("Date"))
@@ -275,6 +298,35 @@ class SelectionDialog(QDialog):
             self.boxes[key] = b
         lay.addWidget(what)
 
+        self.beta_boxes = {}
+        self.album_list = None
+        if self.beta:
+            lib = QGroupBox(tr("Photos library (beta)"))
+            col = QVBoxLayout(lib)
+            for key, label in (("skip_trashed", "Leave out “Recently Deleted”"),
+                               ("skip_hidden", "Leave out hidden photos"),
+                               ("favorites_only", "Only favorites")):
+                b = QCheckBox(tr(label))
+                b.setChecked(choice.beta_flags[key])
+                col.addWidget(b)
+                self.beta_boxes[key] = b
+            known = sorted(set(albums or []) | choice.albums, key=str.casefold)
+            if known:
+                col.addWidget(QLabel(tr("Only from these albums (none ticked: any):")))
+                self.album_list = QListWidget()
+                self.album_list.setMaximumHeight(140)
+                for name in known:
+                    it = QListWidgetItem(name)
+                    it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+                    it.setCheckState(Qt.Checked if name in choice.albums else Qt.Unchecked)
+                    self.album_list.addItem(it)
+                col.addWidget(self.album_list)
+            else:
+                hint = QLabel(tr("Your albums appear here once an iPhone is connected."))
+                hint.setStyleSheet("color: palette(placeholder-text);")
+                col.addWidget(hint)
+            lay.addWidget(lib)
+
         note = QLabel(tr("Files that are already saved are never copied again. What is left out stays on the iPhone and can be copied later."))
         note.setWordWrap(True)
         lay.addWidget(note)
@@ -288,6 +340,7 @@ class SelectionDialog(QDialog):
         self.buttons = buttons
         lay.addWidget(buttons)
 
+        self._old_beta, self._old_albums = dict(choice.beta_flags), set(choice.albums)
         self.preset.currentIndexChanged.connect(self._update)
         for b in self.boxes.values():
             b.toggled.connect(self._update)
@@ -299,6 +352,11 @@ class SelectionDialog(QDialog):
         self.preset.setCurrentIndex(0)
         for b in self.boxes.values():
             b.setChecked(True)
+        for k, b in self.beta_boxes.items():
+            b.setChecked(SelectionChoice.BETA[k])
+        if self.album_list:
+            for i in range(self.album_list.count()):
+                self.album_list.item(i).setCheckState(Qt.Unchecked)
 
     def _update(self, *_):
         custom = self.preset.currentData() == "custom"
@@ -315,6 +373,11 @@ class SelectionDialog(QDialog):
         self.choice.preset = self.preset.currentData()
         self.choice.first, self.choice.last = self.first.date(), self.last.date()
         self.choice.flags = {k: b.isChecked() for k, b in self.boxes.items()}
+        self.choice.beta = self.beta
+        self.choice.beta_flags = {k: b.isChecked() for k, b in self.beta_boxes.items()} or dict(self._old_beta)
+        self.choice.albums = ({self.album_list.item(i).text() for i in range(self.album_list.count())
+                               if self.album_list.item(i).checkState() == Qt.Checked}
+                              if self.album_list else set(self._old_albums))
         self.accept()
 
 
@@ -358,14 +421,19 @@ class SettingsDialog(QDialog):
         self.updates = QCheckBox(tr("Check for new versions (once a day, asks GitHub)"))
         col.addWidget(self.updates)
         lay.addWidget(other)
-        self.extra = QVBoxLayout()
-        lay.addLayout(self.extra)
+        beta = QGroupBox(tr("Beta features"))
+        col = QVBoxLayout(beta)
+        self.beta = QCheckBox(tr("Read the iPhone's Photos library"))
+        col.addWidget(self.beta)
+        col.addWidget(self._hint(tr("Leaves out “Recently Deleted”, warns about photos that are only in iCloud, and adds hidden photos, favorites and albums to “What to copy”. Still new: if the library cannot be read, DCIMDock works as without it.")))
+        lay.addWidget(beta)
 
         self.rename.setChecked(settings.value("rename", False, type=bool))
         self.jpeg.setChecked(bool(how) and settings.value("jpeg", False, type=bool))
         self.auto.setChecked(settings.value("auto_backup", False, type=bool))
         self.login.setChecked(autostart.is_enabled())
         self.updates.setChecked(settings.value("check_updates", True, type=bool))
+        self.beta.setChecked(settings.value("beta", False, type=bool))
         self.auto.toggled.connect(self._auto_toggled)
         self.login.setEnabled(self.auto.isChecked())
 
@@ -395,6 +463,7 @@ class SettingsDialog(QDialog):
         s.setValue("jpeg", self.jpeg.isChecked())
         s.setValue("auto_backup", self.auto.isChecked())
         s.setValue("check_updates", self.updates.isChecked())
+        s.setValue("beta", self.beta.isChecked())
         want = self.login.isChecked()
         if want != autostart.is_enabled():
             try:
@@ -451,6 +520,8 @@ class MainWindow(QMainWindow):
         self._auto_done: set[str] = set()     # udids backed up automatically since plugged in
         self._told: set[tuple[str, str]] = set()   # (udid, state) already shown as a tray message
         self._update: tuple[str, str] | None = None
+        self.library: library.Library | None = None
+        self.lib_error = ""
 
         self._build()
         device.cleanup_stale()
@@ -708,7 +779,8 @@ class MainWindow(QMainWindow):
     def choose_selection(self):
         if self.worker:
             return
-        dlg = SelectionDialog(self, self.choice, self.capture_box.isChecked())
+        dlg = SelectionDialog(self, self.choice, self.capture_box.isChecked(),
+                              self.library.albums if self.library else None)
         if dlg.exec() == QDialog.Accepted:
             self.choice = dlg.choice
             self.choice.save(self.settings)
@@ -815,7 +887,7 @@ class MainWindow(QMainWindow):
         self._wanted = udid
         if self.mount:
             device.unmount(self.mount)
-        self.mount = self.dcim = self.entries = self.plan = None
+        self.mount = self.dcim = self.entries = self.plan = self.library = None
         self._meta_cache = {}
         self.summary.clear()
         self.dev = device.Device(udid)
@@ -827,7 +899,7 @@ class MainWindow(QMainWindow):
             self._gone_during_copy = True
         if self.mount:
             device.unmount(self.mount, lazy=True)
-        self.dev = self.mount = self.dcim = self.entries = self.plan = None
+        self.dev = self.mount = self.dcim = self.entries = self.plan = self.library = None
         self._meta_cache = {}
         self.title.setText("DCIMDock")
         self.summary.clear()
@@ -895,14 +967,27 @@ class MainWindow(QMainWindow):
     def _scan(self):
         self._set_state("scanning", tr("Reading the photo list…"))
         self.summary.clear()
-        self._call(sync.scan, self._scanned, self.dcim)
+        self._call(self._scan_blocking, self._scanned, self.dcim, self.choice.beta)
 
-    def _scanned(self, entries, err):
+    @staticmethod
+    def _scan_blocking(dcim, beta):
+        entries = sync.scan(dcim)
+        lib, why = None, ""
+        if beta:
+            try:
+                with tempfile.TemporaryDirectory(prefix="dcimdock-") as tmp:
+                    lib = library.read(sync.as_source(dcim), Path(tmp))
+            except library.LibraryError as exc:
+                why = str(exc) or "?"
+        return entries, lib, why
+
+    def _scanned(self, res, err):
         if self.dev is None:
             return
         if err:
             self._set_state("error", tr("Could not open the photos: {msg}", msg=_short(str(err))))
             return
+        entries, self.library, self.lib_error = res
         self.entries = entries
         self._replan()
 
@@ -922,7 +1007,7 @@ class MainWindow(QMainWindow):
         index = sync.Index(root, udid)
         need = sync.needs_meta(self.entries, index, opts)
         meta = sync.read_meta(self.dcim, need, self._meta_cache, self.meta_sig.step.emit) if need else None
-        return index, sync.make_plan(self.entries, index, opts, meta)
+        return index, sync.make_plan(self.entries, index, opts, meta, self.library)
 
     def _meta_step(self, i, n):
         if self.state == "scanning":
@@ -949,11 +1034,22 @@ class MainWindow(QMainWindow):
                       n=num(len(p.tasks)), size=size(p.bytes), k=num(known))
         if p.skipped:
             text += " · " + tr("{n} not selected", n=num(p.skipped))
-        self.summary.setText(f"<b>{text}</b>")
+        html = f"<b>{text}</b>"
+        if self.library is not None and self.entries:
+            cloud = self.library.cloud_only(self.entries)
+            if cloud:
+                html += "<br><span style='color:#c0392b'>" + tr(
+                    "{n} photos and videos are only in iCloud and cannot be backed up. On the iPhone: Settings → Photos → “Download and Keep Originals”.",
+                    n=num(cloud)) + "</span>"
+                self._tell("cloud", tr("{n} photos and videos are only in iCloud and cannot be backed up. On the iPhone: Settings → Photos → “Download and Keep Originals”.", n=num(cloud)))
+        elif self.choice.beta and self.lib_error and not self.source:
+            html += "<br><span style='color: palette(placeholder-text)'>" + tr(
+                "Photos library not readable, working without it: {msg}", msg=_short(self.lib_error)) + "</span>"
+        self.summary.setText(html)
         if p.tasks:
             ok, free = sync.free_space_ok(Path(self.dest), p.bytes)
             if not ok:
-                self.summary.setText(f"<b>{text}</b><br><span style='color:#c0392b'>"
+                self.summary.setText(html + "<br><span style='color:#c0392b'>"
                                      + tr("Only {free} free in the backup folder, {need} needed.",
                                           free=size(free), need=size(p.bytes + sync.SPACE_RESERVE))
                                      + "</span>")
@@ -1223,7 +1319,17 @@ class MainWindow(QMainWindow):
 
     def show_diagnosis(self):
         self.setCursor(Qt.WaitCursor)
-        self._call(device.diagnose, lambda res, err: (self.unsetCursor(), DiagDialog(self, res or str(err)).exec()))
+        def lib_line():
+            if not self.choice.beta:
+                return "Photos library (beta): off"
+            if self.library is not None:
+                c = self.library.counts()
+                return (f"Photos library (beta): {self.library.ios_table}, {c['assets']} assets, "
+                        f"{c['trashed']} deleted, {c['hidden']} hidden, {c['favorite']} favorites, "
+                        f"{c['albums']} albums, {self.library.cloud_only(self.entries or [])} only in iCloud")
+            return f"Photos library (beta): not read {self.lib_error}"
+        self._call(device.diagnose, lambda res, err: (self.unsetCursor(), DiagDialog(
+            self, (res or str(err)) + "\n" + lib_line()).exec()))
 
     # ------------------------------------------------------------ preview
     def _preview_toggled(self, on: bool):
@@ -1337,10 +1443,16 @@ class MainWindow(QMainWindow):
         if self.worker:
             return
         dlg = SettingsDialog(self, self.settings)
+        was_beta = self.choice.beta
         if dlg.exec() == QDialog.Accepted:
             self._setup_tray()
+            self.choice = SelectionChoice(self.settings)
+            self._show_selection()
             self._show_example()
-            self._replan()
+            if self.choice.beta != was_beta and self.dcim is not None and not self.worker:
+                self._scan()        # read (or forget) the library
+            else:
+                self._replan()
 
     def _check_update(self):
         if not self.settings.value("check_updates", True, type=bool):

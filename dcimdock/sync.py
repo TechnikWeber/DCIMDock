@@ -22,7 +22,7 @@ import re
 import shutil
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -108,10 +108,34 @@ class Selection:
     screenshots: bool = True
     live: bool = True                   # the .MOV of a Live Photo
     edits: bool = True                  # IMG_E… (edited version) and .AAE (edit steps)
+    # beta, need the Photos library (library.py); without it they are ignored
+    skip_trashed: bool = False          # in "Recently Deleted"
+    skip_hidden: bool = False
+    favorites_only: bool = False
+    albums: frozenset = frozenset()     # only groups in one of these albums; empty: any
 
     @property
     def active(self) -> bool:
-        return self != Selection()
+        """Leaves something out on purpose (skipping deleted photos does not count)."""
+        return replace(self, skip_trashed=False) != Selection()
+
+    @property
+    def needs_library(self) -> bool:
+        return self.skip_trashed or self.skip_hidden or self.favorites_only or bool(self.albums)
+
+    def wants_info(self, info) -> bool:
+        """info: library.Info of the group, None when the library does not know it."""
+        if info is None:
+            return not (self.favorites_only or self.albums)
+        if self.skip_trashed and info.trashed:
+            return False
+        if self.skip_hidden and info.hidden:
+            return False
+        if self.favorites_only and not info.favorite:
+            return False
+        if self.albums and not (info.albums & self.albums):
+            return False
+        return True
 
     @property
     def needs_kind_meta(self) -> bool:
@@ -286,6 +310,10 @@ class DirSource:
     def open_file(self, rel: str):
         return open(self.dcim / rel, "rb", buffering=0)
 
+    def open_root(self, rel: str):
+        """A file next to DCIM, e.g. PhotoData/Photos.sqlite."""
+        return open(self.dcim.parent / rel, "rb")
+
 
 def as_source(dcim):
     """A Path becomes a DirSource; a source object is passed through."""
@@ -391,7 +419,9 @@ def group_time(members: list[Entry], meta: Optional[dict], use_capture: bool) ->
     return min(e.mtime for e in members)
 
 
-def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[dict] = None) -> Plan:
+def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[dict] = None,
+              library=None) -> Plan:
+    """library: library.Library for the beta filters of the selection, or None."""
     plan = Plan()
     root = index.root
     reserved: set[str] = set()
@@ -415,9 +445,11 @@ def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[
             continue
 
         sel = opts.selection
-        if sel.active:
+        if sel.active or sel.needs_library:
             kind = group_kind(members, meta)
-            if not (sel.wants_kind(kind) and sel.wants_time(group_time(members, meta, opts.capture_date))):
+            info = library.get(folder, members[0].name) if library is not None else None
+            lib_ok = library is None or sel.wants_info(info)
+            if not (lib_ok and sel.wants_kind(kind) and sel.wants_time(group_time(members, meta, opts.capture_date))):
                 keep = []
             else:
                 keep = [e for e in new

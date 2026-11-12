@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0] - 2026-11-12
+
+* **Beta: Photos library.** Off by default (*Settings → Beta features*).
+  Reads a copy of the iPhone's `Photos.sqlite`: leaves out *Recently
+  Deleted* (on by default with beta), warns about photos only in iCloud, and
+  adds *leave out hidden*, *only favorites* and *only from these albums* to
+  *What to copy*. Unreadable library: a note, and it works as before.
+* Terminal: `--beta`, `--include-deleted`, `--skip-hidden`, `--favorites`,
+  `--album NAME`.
+* Diagnosis shows what the library contains.
+
 ## [0.4.0] - 2026-11-12
 
 * **Automatic backup** when an iPhone is plugged in, in the background with

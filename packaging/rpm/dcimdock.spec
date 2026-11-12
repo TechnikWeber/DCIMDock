@@ -1,5 +1,5 @@
 Name:           dcimdock
-Version:        0.4.0
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Copy the photos and videos from an iPhone to this computer
 License:        MIT
@@ -54,6 +54,9 @@ install -Dm644 share/io.github.technikweber.dcimdock.metainfo.xml \
 %{_metainfodir}/io.github.technikweber.dcimdock.metainfo.xml
 
 %changelog
+* Thu Nov 12 2026 Philipp Weber - 0.5.0-1
+- Beta: read the Photos library (Recently Deleted, iCloud-only, favorites, albums)
+
 * Thu Nov 12 2026 Philipp Weber - 0.4.0-1
 - Automatic backup, rename by capture time, JPEG next to HEIC, update notice
 

@@ -71,8 +71,12 @@ def selection_from(args):
     else:
         a, b = sync.date_range(args.period)
     kinds = args.only or set(KINDS)
+    extra = {}
+    if args.beta:
+        extra = dict(skip_trashed=not args.include_deleted, skip_hidden=args.skip_hidden,
+                     favorites_only=args.favorites, albums=frozenset(args.album))
     return sync.Selection(a, b, "photos" in kinds, "videos" in kinds, "screenshots" in kinds,
-                          not args.no_live, not args.no_edits)
+                          not args.no_live, not args.no_edits, **extra)
 
 
 def cli(args) -> int:
@@ -120,6 +124,24 @@ def cli(args) -> int:
             root = root / name
         print(tr("Reading the photo list…"))
         entries = sync.scan(dcim)
+        lib = None
+        if args.beta:
+            import tempfile
+
+            from . import library
+            try:
+                with tempfile.TemporaryDirectory(prefix="dcimdock-") as tmp:
+                    lib = library.read(sync.as_source(dcim), Path(tmp))
+                cloud = lib.cloud_only(entries)
+                if cloud:
+                    print(tr("{n} photos and videos are only in iCloud and cannot be backed up. On the iPhone: Settings → Photos → “Download and Keep Originals”.",
+                             n=num(cloud)), file=sys.stderr)
+                missing = set(args.album) - set(lib.albums)
+                if missing:
+                    print(f"! albums not found: {', '.join(sorted(missing))} (have: {', '.join(lib.albums) or '-'})",
+                          file=sys.stderr)
+            except library.LibraryError as exc:
+                print(tr("Photos library not readable, working without it: {msg}", msg=str(exc)), file=sys.stderr)
         index = sync.Index(root, dev.udid)
         split = (tr("Photos"), tr("Videos")) if args.split else ("", "")
         opts = sync.Options(args.layout, "" if args.no_device_folder else sync.safe_name(dev.label), *split,
@@ -134,7 +156,7 @@ def cli(args) -> int:
             meta = sync.read_meta(dcim, need, {}, step)
             if sys.stdout.isatty():
                 print()
-        plan = sync.make_plan(entries, index, opts, meta)
+        plan = sync.make_plan(entries, index, opts, meta, lib)
         known = plan.known + len(plan.adopted)
         if plan.skipped:
             print(tr("{n} not selected", n=num(plan.skipped)))
@@ -247,6 +269,14 @@ def main(argv: list[str] | None = None) -> int:
                      help="comma separated: photos, videos, screenshots")
     sel.add_argument("--no-live", action="store_true", help="without the video of Live Photos")
     sel.add_argument("--no-edits", action="store_true", help="without edited versions (IMG_E…) and .AAE files")
+    beta = parser.add_argument_group("beta: read the Photos library of the iPhone")
+    beta.add_argument("--beta", action="store_true",
+                      help="read it: leaves out Recently Deleted, warns about photos only in iCloud")
+    beta.add_argument("--include-deleted", action="store_true", help="with --beta: copy Recently Deleted too")
+    beta.add_argument("--skip-hidden", action="store_true", help="with --beta: without hidden photos")
+    beta.add_argument("--favorites", action="store_true", help="with --beta: only favorites")
+    beta.add_argument("--album", action="append", default=[], metavar="NAME",
+                      help="with --beta: only from this album (can be given more than once)")
     parser.add_argument("--selftest", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--background", action="store_true",
                         help="start with only the tray icon (used by the autostart)")

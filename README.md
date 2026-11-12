@@ -80,6 +80,18 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
   and GPS go along. Built into the AppImage and the `.exe`; the RPM uses
   `heif-dec` from `libheif-tools`.
 * Tells you when a new version is out (once a day, can be switched off).
+* **Beta: the iPhone's Photos library** (*More → Settings → Beta features*).
+  DCIMDock reads a copy of `PhotoData/Photos.sqlite` and then
+  * leaves out photos in *Recently Deleted* (they stay in `DCIM` until they
+    are purged),
+  * warns how many photos and videos are only in iCloud and therefore
+    cannot be backed up,
+  * offers *leave out hidden photos*, *only favorites* and *only from these
+    albums* under *What to copy*.
+
+  Apple changes this database with iOS versions. If it cannot be read,
+  DCIMDock says so and works as without it. Terminal:
+  `--beta [--include-deleted] [--skip-hidden] [--favorites] [--album NAME]`.
 * Checks the free space before it starts.
 * Progress bar with speed and time left. The **preview** of the photo just
   copied is decoded at reduced size in its own thread, at most about twice a

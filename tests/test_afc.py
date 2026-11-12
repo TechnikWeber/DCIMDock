@@ -185,3 +185,20 @@ class TestAfc(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(AfcException is None, "pymobiledevice3 not installed")
+class TestAfcLibrary(unittest.TestCase):
+    def test_library_over_afc(self):
+        from dcimdock import afc, library
+        from .test_library import make_db
+        with tempfile.TemporaryDirectory() as tmp:
+            phone = Path(tmp) / "phone"
+            (phone / "PhotoData").mkdir(parents=True)
+            (phone / "DCIM/100APPLE").mkdir(parents=True)
+            make_db(phone / "PhotoData/Photos.sqlite")
+            fake = FakeAfc(phone)
+            src = afc.AfcSource("UDID", FakeLockdown(), fake)
+            lib = library.read(src, Path(tmp) / "lib")
+            self.assertEqual(lib.albums, ["Urlaub"])
+            self.assertEqual(fake.handles, {})
