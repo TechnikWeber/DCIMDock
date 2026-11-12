@@ -186,6 +186,8 @@ DE = {
     "“Apple Devices” from the Microsoft Store (or iTunes from apple.com)":
         "„Apple Geräte“ aus dem Microsoft Store (oder iTunes von apple.com)",
     "Open Microsoft Store": "Microsoft Store öffnen",
+    "“Apple Devices” is installed, but its driver did not start. Sign out of Windows and in again, or restart the PC.":
+        "„Apple Geräte“ ist installiert, aber sein Treiber ist nicht gestartet. Melde dich bei Windows ab und wieder an oder starte den PC neu.",
     "Diagnosis…": "Diagnose …",
     "Diagnosis": "Diagnose",
     "Paste this into a bug report:": "Für eine Fehlermeldung hier herauskopieren:",

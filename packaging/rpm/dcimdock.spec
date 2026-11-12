@@ -1,5 +1,5 @@
 Name:           dcimdock
-Version:        0.5.2
+Version:        0.5.3
 Release:        1%{?dist}
 Summary:        Copy the photos and videos from an iPhone to this computer
 License:        MIT
@@ -54,6 +54,9 @@ install -Dm644 share/io.github.technikweber.dcimdock.metainfo.xml \
 %{_metainfodir}/io.github.technikweber.dcimdock.metainfo.xml
 
 %changelog
+* Thu Nov 12 2026 Philipp Weber - 0.5.3-1
+- Windows: start the Apple Devices driver right after installing it
+
 * Thu Nov 12 2026 Philipp Weber - 0.5.2-1
 - Windows: link to the Apple Devices app in the Microsoft Store
 

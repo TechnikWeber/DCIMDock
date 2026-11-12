@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from typing import Callable
 
 from .device import Device, DeviceError, NoPhotos  # noqa: F401 – part of the backend API
@@ -36,6 +37,13 @@ SERVICE_ACTION = ("Restart the iPhone service (Apple Mobile Device Service)" if 
 DCIM = "/DCIM"
 TIMEOUT = 30          # seconds for one AFC request; a pulled cable must not hang a thread
 WINDOWS_MUX = ("127.0.0.1", 27015)
+# The Store app has no Windows service: its driver is a startup task that runs
+# only from the next sign-in on. Started by hand it needs the package context.
+_STORE_PKG = "AppleInc.AppleDevices"
+_STORE_LAUNCH = (
+    f"$p = Get-AppxPackage {_STORE_PKG} | Select-Object -First 1; if (-not $p) {{ exit 3 }}; "
+    "Invoke-CommandInDesktopPackage -PackageFamilyName $p.PackageFamilyName -AppId App "
+    "-Command (Join-Path $p.InstallLocation 'AppleMobileDeviceLauncher.exe') -ErrorAction Stop")
 
 
 # ---------------------------------------------------------------- event loop
@@ -105,12 +113,55 @@ def _mux_reachable() -> bool:
         return False
 
 
+def _powershell(script: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                          capture_output=True, text=True, timeout=timeout,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def _store_app_installed() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        p = _powershell(f"if (Get-AppxPackage {_STORE_PKG}) {{ exit 0 }} else {{ exit 1 }}")
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return p.returncode == 0
+
+
+def _wait_for_mux(seconds: float) -> bool:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if _mux_reachable():
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def start_store_driver(wait: float = 20) -> tuple[bool, str]:
+    """Start the Apple Devices app's driver now instead of at the next sign-in."""
+    if sys.platform != "win32":
+        return False, "not Windows"
+    try:
+        p = _powershell(_STORE_LAUNCH)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    if p.returncode == 3:
+        return False, "Apple Devices app not installed"
+    if p.returncode != 0:
+        return False, (p.stdout + p.stderr).strip()
+    return _wait_for_mux(wait), ""
+
+
 def missing() -> list[str]:
     try:
         import pymobiledevice3  # noqa: F401
     except ImportError:
         return ["pymobiledevice3"]
     if not _mux_reachable():
+        # just installed from the Store: its driver would only start at the next sign-in
+        if start_store_driver()[0]:
+            return []
         return ["Apple Mobile Device Service"]
     return []
 
@@ -118,6 +169,9 @@ def missing() -> list[str]:
 def install_command(info: dict | None = None) -> str:
     if sys.platform == "win32":
         from .i18n import tr
+        if _store_app_installed():
+            return tr("“Apple Devices” is installed, but its driver did not start. "
+                      "Sign out of Windows and in again, or restart the PC.")
         return tr("“Apple Devices” from the Microsoft Store (or iTunes from apple.com)") + "\n" + INSTALL_URL
     return "pip install pymobiledevice3"
 
@@ -225,6 +279,8 @@ def restart_service() -> tuple[bool, str]:
     if sys.platform != "win32":
         from . import device
         return device.restart_service()
+    if _store_app_installed():      # Store app: no service, start its driver (no admin rights)
+        return start_store_driver()
     # Restart-Service needs admin rights: Windows shows its UAC prompt
     inner = ("Get-Service | Where-Object { $_.DisplayName -like 'Apple Mobile Device*' } "
              "| Restart-Service -Force")
@@ -251,6 +307,7 @@ def diagnose() -> str:
     lines.append(f"Missing: {', '.join(missing()) or 'nothing'}")
     if sys.platform == "win32":
         lines.append(f"Apple Mobile Device Service: {'answers' if _mux_reachable() else 'NOT reachable'}")
+        lines.append(f"Apple Devices app (Store): {'installed' if _store_app_installed() else 'not installed'}")
     ids = list_devices()
     lines.append(f"Devices: {', '.join(ids) or 'no device'}")
     for udid in ids:

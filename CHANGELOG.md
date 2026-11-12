@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.3] - 2026-11-12
+
+* Windows: the *Apple Devices* app from the Store has no Windows service;
+  its driver starts only at the next sign-in. DCIMDock now starts it itself
+  right after installing, so *Check again* works without signing out.
+  *Restart the iPhone service* does the same (no admin rights needed).
+  If it still does not start: a note to sign out and in again.
+* Diagnosis says whether the Store app is installed.
+
 ## [0.5.2] - 2026-11-12
 
 (The tag v0.5.1 went out by mistake on the code of 0.5.0; it has no release.)
