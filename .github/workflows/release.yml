@@ -16,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build AppImage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: packaging/appimage/build.sh
       # upload first, so a failing start test still leaves the file to look at
       - uses: actions/upload-artifact@v4

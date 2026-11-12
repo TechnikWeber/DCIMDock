@@ -22,7 +22,11 @@ cd "$work"
 export APPIMAGE_EXTRACT_AND_RUN=1   # no FUSE needed on CI runners
 
 # ---- 1. relocatable Python ------------------------------------------------
-asset=$(curl -fsSL "https://api.github.com/repos/niess/python-appimage/releases/tags/python$PY" \
+# Anonymous API calls share a small limit per IP (CI runners hit it: 403);
+# with the workflow's token they count against the repository instead.
+auth=()
+[ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+asset=$(curl -fsSL --retry 3 "${auth[@]}" "https://api.github.com/repos/niess/python-appimage/releases/tags/python$PY" \
     | grep -o "\"name\": *\"python${PY}[^\"]*manylinux_2_28_x86_64.AppImage\"" \
     | head -1 | sed 's/.*"\(python[^"]*\)"/\1/')
 [ -n "$asset" ] || { echo "no python $PY AppImage found" >&2; exit 1; }
