@@ -14,7 +14,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Tests
-        run: python -m unittest discover -s tests -t . -v
+        run: |
+          pip install -q "pymobiledevice3>=9,<12"
+          python -m unittest discover -s tests -t . -v
       - name: ShellCheck
         run: shellcheck bin/dcimdock install.sh uninstall.sh packaging/appimage/build.sh packaging/rpm/build.sh
 
@@ -30,3 +32,29 @@ jobs:
         run: |
           dnf install -y dist/*.noarch.rpm
           QT_QPA_PLATFORM=offscreen dcimdock --selftest
+
+  windows:
+    # tests, the window from source, then the one-file .exe (see release.yml)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build .exe
+        run: packaging/windows/build.ps1
+      - name: Tests
+        run: python -m unittest discover -s tests -t . -v
+      - name: Start from source (offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m dcimdock --selftest
+      - name: Start the .exe (offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $env:DCIMDOCK_SELFTEST_LOG = "$PWD\selftest.txt"
+          $exe = Get-Item dist\DCIMDock-*-windows-x64.exe
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { throw "selftest exit code $($p.ExitCode)" }

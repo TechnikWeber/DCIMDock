@@ -1,6 +1,6 @@
 name: release
 
-# Tag v1.2.3 -> GitHub release with AppImage (+ .zsync) and RPM.
+# Tag v1.2.3 -> GitHub release with AppImage (+ .zsync), RPM and Windows .exe.
 # "Run workflow" by hand builds the same files as artifacts only.
 on:
   push:
@@ -46,9 +46,32 @@ jobs:
           name: rpm
           path: dist/*.noarch.rpm
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build .exe
+        run: packaging/windows/build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.exe
+      - name: Start the .exe (offscreen)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $env:DCIMDOCK_SELFTEST_LOG = "$PWD\selftest.txt"
+          $exe = Get-Item dist\DCIMDock-*-windows-x64.exe
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { throw "selftest exit code $($p.ExitCode)" }
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [appimage, rpm]
+    needs: [appimage, rpm, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

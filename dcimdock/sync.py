@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -118,8 +119,11 @@ def with_suffix(name: str, n: int) -> str:
     return f"{stem}_{n}{ext}"
 
 
+_UNSAFE = r'[/\\\x00-\x1f<>:"|?*]' if sys.platform == "win32" else r"[/\\\x00-\x1f]"
+
+
 def safe_name(text: str) -> str:
-    text = re.sub(r"[/\\\x00-\x1f]", "_", text).strip(" .")
+    text = re.sub(_UNSAFE, "_", text).strip(" .")
     return text[:80] or "iPhone"
 
 
@@ -161,23 +165,48 @@ def find_dcim(root: Path) -> Path:
     return root
 
 
-def scan(dcim: Path, cancel: Callable[[], bool] = lambda: False) -> list[Entry]:
-    out: list[Entry] = []
-    for top, dirs, files in os.walk(dcim):
-        if cancel():
-            raise Cancelled
-        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-        for f in sorted(files):
-            if f.startswith(".") or f.endswith(".part"):
-                continue
-            p = os.path.join(top, f)
-            try:
-                st = os.stat(p)
-            except OSError:
-                continue
-            rel = os.path.relpath(p, dcim).replace(os.sep, "/")
-            out.append(Entry(rel, st.st_size, st.st_mtime))
-    return out
+class DirSource:
+    """The DCIM tree in a folder: a mounted iPhone (ifuse) or --source.
+
+    A source only has to scan() and open_file(); the Windows backend talks to
+    the iPhone directly over AFC (see afc.py) and offers the same two calls.
+    """
+
+    def __init__(self, dcim: Path):
+        self.dcim = Path(dcim)
+
+    def __str__(self) -> str:
+        return str(self.dcim)
+
+    def scan(self, cancel: Callable[[], bool] = lambda: False) -> list[Entry]:
+        out: list[Entry] = []
+        for top, dirs, files in os.walk(self.dcim):
+            if cancel():
+                raise Cancelled
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            for f in sorted(files):
+                if f.startswith(".") or f.endswith(".part"):
+                    continue
+                p = os.path.join(top, f)
+                try:
+                    st = os.stat(p)
+                except OSError:
+                    continue
+                rel = os.path.relpath(p, self.dcim).replace(os.sep, "/")
+                out.append(Entry(rel, st.st_size, st.st_mtime))
+        return out
+
+    def open_file(self, rel: str):
+        return open(self.dcim / rel, "rb", buffering=0)
+
+
+def as_source(dcim):
+    """A Path becomes a DirSource; a source object is passed through."""
+    return dcim if hasattr(dcim, "open_file") else DirSource(Path(dcim))
+
+
+def scan(dcim, cancel: Callable[[], bool] = lambda: False) -> list[Entry]:
+    return as_source(dcim).scan(cancel)
 
 
 class Index:
@@ -246,17 +275,22 @@ def needs_meta(entries: list[Entry], index: Index, opts: Options) -> list[Entry]
     return out
 
 
-def read_meta(dcim: Path, entries: list[Entry], cache: dict,
+def read_meta(dcim, entries: list[Entry], cache: dict,
               progress: Callable[[int, int], None] = lambda i, n: None,
               cancel: Callable[[], bool] = lambda: False) -> dict:
     """rel -> meta.Meta for the given entries, reusing what cache already has."""
+    src = as_source(dcim)
     todo = [e for e in entries if (e.rel, e.size, e.mtime) not in cache]
     for i, e in enumerate(todo, 1):
         if cancel():
             raise Cancelled
         if i % 10 == 0 or i == len(todo):
             progress(i, len(todo))
-        cache[(e.rel, e.size, e.mtime)] = metadata.read(str(dcim / e.rel))
+        try:
+            with src.open_file(e.rel) as f:
+                cache[(e.rel, e.size, e.mtime)] = metadata.read_file(f, e.name, e.size)
+        except OSError:
+            cache[(e.rel, e.size, e.mtime)] = metadata.Meta()
     return {e.rel: cache[(e.rel, e.size, e.mtime)] for e in entries if (e.rel, e.size, e.mtime) in cache}
 
 
@@ -358,13 +392,15 @@ def _place(part: Path, dest: Path):
         os.rename(part, dest)
 
 
-def copy_one(src: Path, dest: Path, e: Entry, progress: Callable[[int], None],
+def copy_one(src, dest: Path, e: Entry, progress: Callable[[int], None],
              cancel: Callable[[], bool]) -> str:
+    """src: a path, or a function that opens the source file."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     h = hashlib.sha256()
     try:
-        with open(src, "rb", buffering=0) as fi, open(part, "wb") as fo:
+        opener = src if callable(src) else (lambda: open(src, "rb", buffering=0))
+        with opener() as fi, open(part, "wb") as fo:
             while True:
                 if cancel():
                     raise Cancelled
@@ -390,12 +426,13 @@ def copy_one(src: Path, dest: Path, e: Entry, progress: Callable[[int], None],
     return h.hexdigest()
 
 
-def run(plan: Plan, dcim: Path, index: Index,
+def run(plan: Plan, dcim, index: Index,
         progress: Callable[[int, int, Task], None] = lambda done, i, t: None,
         file_done: Callable[[Task, Path], None] = lambda t, p: None,
         cancel: Callable[[], bool] = lambda: False) -> Result:
     """Copy plan.tasks. progress(bytes_done_total, task_number, task)."""
     res = Result()
+    src = as_source(dcim)
     t0 = time.monotonic()
     for t in plan.adopted:
         index.add(t.entry, t.dest)
@@ -415,7 +452,7 @@ def run(plan: Plan, dcim: Path, index: Index,
                 progress(done, i, task)
             before = done
             try:
-                digest = copy_one(dcim / task.entry.rel, dest, task.entry, step, cancel)
+                digest = copy_one(lambda rel=task.entry.rel: src.open_file(rel), dest, task.entry, step, cancel)
             except Cancelled:
                 raise
             except OSError as exc:

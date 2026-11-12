@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 TOOLS = ("idevice_id", "ideviceinfo", "idevicepair", "ifuse")
+HAS_MOUNTS = True     # the Windows backend (afc.py) reads without mounting
+SERVICE_ACTION = "Restart the iPhone service (usbmuxd)"
 _UDID = re.compile(r"^[0-9A-Fa-f-]{24,40}$")
 
 
@@ -258,6 +260,9 @@ def restart_usbmuxd() -> tuple[bool, str]:
     return rc == 0, out.strip()
 
 
+restart_service = restart_usbmuxd
+
+
 def diagnose() -> str:
     """Everything useful for a bug report, as plain text."""
     from . import __version__
@@ -310,6 +315,10 @@ def mount(udid: str) -> Path:
         unmount(mp, lazy=True)
         raise NoPhotos("DCIM not visible")
     return mp
+
+
+def dcim_of(mp: Path) -> Path:
+    return mp / "DCIM"
 
 
 def cleanup_stale():

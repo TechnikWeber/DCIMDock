@@ -279,20 +279,27 @@ def parse_movie(f: BinaryIO, size: int) -> Meta:
 # ------------------------------------------------------------------ entry
 
 def read(path: str) -> Meta:
-    ext = os.path.splitext(path)[1].lower()
     try:
         with open(path, "rb") as f:
-            size = os.fstat(f.fileno()).st_size
-            if ext in (".jpg", ".jpeg"):
-                return parse_jpeg(f.read(HEAD))
-            if ext == ".png":
-                return parse_png(f.read(HEAD))
-            if ext in (".heic", ".heif", ".avif"):
-                return parse_heic(f, size)
-            if ext in (".mov", ".mp4", ".m4v", ".3gp"):
-                return parse_movie(f, size)
-            if ext in (".dng", ".tif", ".tiff"):
-                return parse_tiff(f.read(HEAD))
+            return read_file(f, path, os.fstat(f.fileno()).st_size)
+    except OSError:
+        return Meta()
+
+
+def read_file(f, name: str, size: int) -> Meta:
+    """f: any seekable binary file (a local file or a file on the iPhone)."""
+    ext = os.path.splitext(name)[1].lower()
+    try:
+        if ext in (".jpg", ".jpeg"):
+            return parse_jpeg(f.read(HEAD))
+        if ext == ".png":
+            return parse_png(f.read(HEAD))
+        if ext in (".heic", ".heif", ".avif"):
+            return parse_heic(f, size)
+        if ext in (".mov", ".mp4", ".m4v", ".3gp"):
+            return parse_movie(f, size)
+        if ext in (".dng", ".tif", ".tiff"):
+            return parse_tiff(f.read(HEAD))
     except (OSError, struct.error, IndexError, ValueError):
         pass
     return Meta()

@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (
     QSizePolicy, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import device, sync
+from . import sync
+from .backend import device
 from .i18n import date, duration, num, size, tr
 from .icon import app_icon
 
@@ -161,8 +162,8 @@ class MainWindow(QMainWindow):
         self.selftest = selftest
 
         self.dev: device.Device | None = None
-        self.mount: Path | None = None
-        self.dcim: Path | None = None
+        self.mount = None      # mount point (Linux) or open AFC connection (Windows)
+        self.dcim = None       # Path or sync source
         self.entries: list[sync.Entry] | None = None
         self.plan: sync.Plan | None = None
         self.index: sync.Index | None = None
@@ -342,8 +343,9 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         fix = menu.addMenu(tr("Troubleshooting"))
         self.act_release = fix.addAction(tr("Release stuck iPhone folders"), self.fix_mounts)
+        self.act_release.setVisible(device.HAS_MOUNTS)
         self.act_repair = fix.addAction(tr("Pair again (ask for Trust again)"), self.fix_pairing)
-        self.act_usbmuxd = fix.addAction(tr("Restart the iPhone service (usbmuxd)"), self.fix_usbmuxd)
+        self.act_usbmuxd = fix.addAction(tr(device.SERVICE_ACTION), self.fix_usbmuxd)
         fix.addSeparator()
         fix.addAction(tr("Diagnosis…"), self.show_diagnosis)
         self.more_btn.setMenu(menu)
@@ -549,7 +551,7 @@ class MainWindow(QMainWindow):
         self._retry_at = time.monotonic() + 3
         if state == "ready":
             self.mount = mp
-            self.dcim = mp / "DCIM"
+            self.dcim = device.dcim_of(mp)
             self._scan()
         elif state == "locked":
             self._set_state("locked", tr("Unlock your iPhone."))
@@ -861,7 +863,7 @@ class MainWindow(QMainWindow):
             ok, msg = res if res else (False, str(err))
             QMessageBox.information(self, tr("Troubleshooting"), tr("The iPhone service was restarted. Unplug the iPhone and plug it in again.")
                                     if ok else tr("Could not restart the service: {msg}", msg=_short(msg) or "-"))
-        self._fix(device.restart_usbmuxd, after)
+        self._fix(device.restart_service, after)
 
     def show_diagnosis(self):
         self.setCursor(Qt.WaitCursor)

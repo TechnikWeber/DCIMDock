@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import locale
 import os
+import sys
 import time
 
 DE = {
@@ -103,6 +104,10 @@ DE = {
     "Release stuck iPhone folders": "Hängende iPhone-Ordner lösen",
     "Pair again (ask for Trust again)": "Neu koppeln (Vertrauen erneut abfragen)",
     "Restart the iPhone service (usbmuxd)": "iPhone-Dienst neu starten (usbmuxd)",
+    "Restart the iPhone service (Apple Mobile Device Service)":
+        "iPhone-Dienst neu starten (Apple Mobile Device Service)",
+    "“Apple Devices” from the Microsoft Store (or iTunes from apple.com)":
+        "„Apple-Geräte“ aus dem Microsoft Store (oder iTunes von apple.com)",
     "Diagnosis…": "Diagnose …",
     "Diagnosis": "Diagnose",
     "Paste this into a bug report:": "Für eine Fehlermeldung hier herauskopieren:",
@@ -154,8 +159,7 @@ iCloud and on all your other devices, too.</p>
 <p><i>Settings → Camera → Formats</i>. <b>High Efficiency</b> (HEIC photos,
 HEVC videos) is the better choice: half the size of JPEG at the same or
 better quality, 10-bit color and HDR, and Live Photos and portrait depth
-stay complete. Linux opens HEIC almost everywhere today (KDE, GNOME, GIMP,
-darktable). Pick <b>Most Compatible</b> (JPEG/H.264) only if old programs or
+stay complete. {heic} Pick <b>Most Compatible</b> (JPEG/H.264) only if old programs or
 devices must open the files.</p>
 
 <h4>4. “Transfer to Mac or PC”</h4>
@@ -197,8 +201,7 @@ löscht es auch in der iCloud und auf allen anderen Geräten.</p>
 <p><i>Einstellungen → Kamera → Formate</i>. <b>High Efficiency</b>
 (HEIC-Fotos, HEVC-Videos) ist die bessere Wahl: halb so groß wie JPEG bei
 gleicher oder besserer Qualität, 10 Bit Farbtiefe und HDR, Live Photos und
-Porträt-Tiefendaten bleiben vollständig. Linux öffnet HEIC heute fast überall
-(KDE, GNOME, GIMP, darktable). <b>Maximale Kompatibilität</b> (JPEG/H.264)
+Porträt-Tiefendaten bleiben vollständig. {heic} <b>Maximale Kompatibilität</b> (JPEG/H.264)
 nur wählen, wenn alte Programme oder Geräte die Dateien öffnen müssen.</p>
 
 <h4>4. „Auf Mac oder PC übertragen“</h4>
@@ -223,8 +226,25 @@ def _pick() -> str:
         val = os.environ.get(var)
         if val:
             return "de" if val.lower().startswith("de") else "en"
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            # primary language of the UI language: 0x07 is German
+            return "de" if ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF == 0x07 else "en"
+        except (AttributeError, OSError):
+            pass
     lang = (locale.getlocale()[0] or "").lower()
     return "de" if lang.startswith("de") else "en"
+
+
+HEIC = {
+    ("en", False): "Linux opens HEIC almost everywhere today (KDE, GNOME, GIMP, darktable).",
+    ("de", False): "Linux öffnet HEIC heute fast überall (KDE, GNOME, GIMP, darktable).",
+    ("en", True): "Windows opens HEIC with the free <i>HEIF Image Extensions</i> from the "
+                  "Microsoft Store; HEVC videos need the <i>HEVC Video Extensions</i> (or VLC).",
+    ("de", True): "Windows öffnet HEIC mit den kostenlosen <i>HEIF-Bilderweiterungen</i> aus dem "
+                  "Microsoft Store; HEVC-Videos brauchen die <i>HEVC-Videoerweiterungen</i> (oder VLC).",
+}
 
 
 LANG = _pick()
@@ -232,7 +252,8 @@ LANG = _pick()
 
 def tr(text: str, **kw) -> str:
     if text == "INTRO_HTML":
-        return INTRO_DE if LANG == "de" else INTRO_EN
+        intro = INTRO_DE if LANG == "de" else INTRO_EN
+        return intro.replace("{heic}", HEIC[(LANG, sys.platform == "win32")])
     out = (DE.get(text) or text) if LANG == "de" else text
     return out.format(**kw) if kw else out
 

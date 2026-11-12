@@ -45,7 +45,8 @@ def _default_dest() -> Path:
 
 
 def cli(args) -> int:
-    from . import device, sync
+    from . import sync
+    from .backend import device
     from .i18n import date, duration, num, size, tr
 
     mount = None
@@ -72,8 +73,12 @@ def cli(args) -> int:
         if state != "ready":
             print(tr("The iPhone does not answer: {msg}", msg=msg), file=sys.stderr)
             return 1
-        mount = device.mount(dev.udid)
-        dcim = mount / "DCIM"
+        try:
+            mount = device.mount(dev.udid)
+        except device.DeviceError as exc:
+            print(tr("Could not open the photos: {msg}", msg=str(exc)), file=sys.stderr)
+            return 1
+        dcim = device.dcim_of(mount)
         print(f"{dev.label} ({dev.product}, iOS {dev.ios})")
 
     try:
@@ -223,7 +228,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         def report():
             ok = not win.windowIcon().isNull()
-            print(f"selftest ok: dcimdock {__version__}, Qt window built, icon {'ok' if ok else 'MISSING'}")
+            backend = "ifuse"
+            from .backend import device
+            if hasattr(device, "selfcheck"):
+                try:
+                    backend = device.selfcheck()
+                except Exception as exc:   # noqa: BLE001
+                    backend, ok = f"afc BROKEN: {exc!r}", False
+            line = (f"selftest {'ok' if ok else 'FAILED'}: dcimdock {__version__}, Qt window built, "
+                    f"icon {'ok' if not win.windowIcon().isNull() else 'MISSING'}, {backend}")
+            print(line)
+            log = os.environ.get("DCIMDOCK_SELFTEST_LOG")   # the windowed .exe has no stdout
+            if log:
+                Path(log).write_text(line + "\n", "utf-8")
             app.exit(0 if ok else 1)
         QTimer.singleShot(500, report)
     rc = app.exec()

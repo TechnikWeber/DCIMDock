@@ -5,7 +5,7 @@
   <a href="https://github.com/TechnikWeber/DCIMDock/releases/latest"><img alt="Download" src="https://img.shields.io/github/v/release/TechnikWeber/DCIMDock?include_prereleases&label=download&color=2ea44f"></a>
   <a href="https://github.com/TechnikWeber/DCIMDock/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/TechnikWeber/DCIMDock/total?color=blue"></a>
   <a href="https://github.com/TechnikWeber/DCIMDock/actions/workflows/ci.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/TechnikWeber/DCIMDock/ci.yml?branch=main&label=build"></a>
-  <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Linux-blue">
+  <img alt="Platform: Linux | Windows" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-blue">
   <img alt="UI: English | Deutsch" src="https://img.shields.io/badge/UI-English%20%7C%20Deutsch-informational">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
@@ -18,7 +18,7 @@
   <a href="https://github.com/TechnikWeber/DCIMDock/releases"><b>Releases</b></a>
 </p>
 
-Copy the photos and videos from your iPhone to your Linux computer over USB:
+Copy the photos and videos from your iPhone to your Linux or Windows computer over USB:
 only what is new, never overwriting anything, with a progress bar and an
 optional preview. Nothing on the iPhone is changed.
 
@@ -35,8 +35,11 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
 ## What it does
 
 * Detects the iPhone and walks you through **Trust** and the passcode.
-* Mounts it **read-only** (`ifuse -o ro`) in a private folder and unmounts
-  it again afterwards.
+* On Linux it mounts it **read-only** (`ifuse -o ro`) in a private folder
+  and unmounts it again afterwards. On Windows it reads the files directly
+  over Apple's file protocol (AFC, via
+  [pymobiledevice3](https://github.com/doronz88/pymobiledevice3)), only ever
+  opening them for reading.
 * Copies **only new files**. An index per iPhone remembers what is already
   saved, so the second run takes seconds.
 * **Never overwrites.** A name that is taken by a different file gets a
@@ -73,12 +76,13 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
   the SHA-256 taken while copying. Worth doing before you delete photos on
   the iPhone. Works without the iPhone connected.
 * **Troubleshooting** menu:
-  * *Release stuck iPhone folders*: unmounts every ifuse mount, also
+  * *Release stuck iPhone folders* (Linux): unmounts every ifuse mount, also
     hand-made ones like `~/iPhone`. A mount whose iPhone is gone
     (*Transport endpoint is not connected*) is released automatically on
     start.
   * *Pair again*: forgets the trust on this computer and asks the iPhone again.
-  * *Restart the iPhone service* (`usbmuxd`, asks for your password).
+  * *Restart the iPhone service* (`usbmuxd` on Linux, asks for your
+    password; *Apple Mobile Device Service* on Windows, asks for admin rights).
   * *Diagnosis*: versions, device, pairing and mounts as text for a bug report.
 * If the iPhone was mounted while locked (an empty pseudo folder without
   `DCIM`), DCIMDock unmounts it and asks you to unlock.
@@ -103,7 +107,9 @@ The same notes appear in the app on first launch:
   until the Photos app has downloaded everything.
 * **HEIC or JPEG** (*Settings → Camera → Formats*): *High Efficiency* is the
   better choice: half the size, 10-bit color and HDR, complete Live Photos.
-  Linux opens HEIC almost everywhere today.
+  Linux opens HEIC almost everywhere today; Windows needs the free *HEIF
+  Image Extensions* from the Microsoft Store (and *HEVC Video Extensions* or
+  VLC for the videos).
 * **"Transfer to Mac or PC"** (*Settings → Apps → Photos*) only matters for
   the camera import (PTP). DCIMDock always gets the original files.
 * **Deleting:** DCIMDock does not delete anything on the iPhone. Deleting
@@ -112,6 +118,8 @@ The same notes appear in the app on first launch:
   turned on, this deletes them in iCloud and on all your devices too.
 
 ## Download
+
+### Linux
 
 DCIMDock needs `usbmuxd`, `ifuse` and the libimobiledevice tools from your
 distribution. If they are missing, the window tells you the exact command:
@@ -141,18 +149,34 @@ cd DCIMDock
 `install.sh` offers to install PySide6 and the tools above with your
 package manager (dnf, apt, pacman or zypper).
 
+### Windows
+
+1. Install Apple's driver: the **Apple Devices** app from the Microsoft
+   Store (or iTunes from apple.com). DCIMDock talks to the iPhone through its
+   *Apple Mobile Device Service*. You do not have to open the app.
+2. Download `DCIMDock-*-windows-x64.exe` from the
+   [latest release](https://github.com/TechnikWeber/DCIMDock/releases/latest)
+   and run it. One file, no installer, no admin rights.
+
+The `.exe` is not signed, so Windows SmartScreen may say *Windows protected
+your PC*: click *More info* → *Run anyway*. The terminal mode (`--cli`,
+`--verify`) is not part of the `.exe`; from the source it runs with
+`pip install . pymobiledevice3` and `python -m dcimdock --cli`.
+
 ## Good to know
 
 * Copies the camera roll (`DCIM`): photos, videos, screenshots, Live Photos,
   edits. Albums, captions and the Photos library itself are not part of it.
 * The **HEIC preview** needs Qt's HEIF plugin (`kf6-kimageformats` on
   Fedora/KDE, `kimageformats6` / `qt6-image-formats-plugins` elsewhere). The
-  AppImage brings its own Qt without it and shows the file name instead. The
-  copy itself is not affected.
+  AppImage and the Windows `.exe` bring their own Qt without it and show the
+  file name instead. The copy itself is not affected.
 * The backup folder holds a hidden `.dcimdock/` folder with the index.
   Deleting it is harmless: files that are already there are recognised by
   name, size and date and not copied again.
 * No Flatpak package: a sandboxed app cannot reach `usbmuxd` and FUSE.
+* A backup drive can move between Linux and Windows: the index is named after
+  the iPhone's UDID on both, so nothing is copied twice.
 * Not affiliated with Apple. iPhone and iCloud are trademarks of Apple Inc.
 
 ## License
