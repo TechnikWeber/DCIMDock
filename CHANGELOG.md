@@ -6,8 +6,8 @@
   It reads the photos directly over AFC with pymobiledevice3 (no mounting)
   and needs Apple's driver from the "Apple Devices" app or iTunes. Same
   window, same rules: only new files, never overwrite, `.part` files,
-  SHA-256, nothing on the iPhone is changed. Not tested with a real iPhone
-  on Windows yet.
+  SHA-256, nothing on the iPhone is changed.
+* Status beta: tested with a real iPhone on Linux.
 * The index file is named after the same UDID on Linux and Windows, so a
   backup drive can move between both.
 * Linux is unchanged (ifuse). `DCIMDOCK_BACKEND=afc` tries the Windows way

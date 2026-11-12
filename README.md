@@ -1,7 +1,7 @@
 # DCIMDock
 
 <p>
-  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-orange">
+  <img alt="Status: beta" src="https://img.shields.io/badge/status-beta-yellow">
   <a href="https://github.com/TechnikWeber/DCIMDock/releases/latest"><img alt="Download" src="https://img.shields.io/github/v/release/TechnikWeber/DCIMDock?include_prereleases&label=download&color=2ea44f"></a>
   <a href="https://github.com/TechnikWeber/DCIMDock/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/TechnikWeber/DCIMDock/total?color=blue"></a>
   <a href="https://github.com/TechnikWeber/DCIMDock/actions/workflows/ci.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/TechnikWeber/DCIMDock/ci.yml?branch=main&label=build"></a>
