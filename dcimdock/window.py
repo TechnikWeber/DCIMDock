@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 import tempfile
 
-from . import autostart, jpeg, library, sync, update
+from . import __version__, autostart, jpeg, library, sync, update
 from .backend import device
 from .i18n import date, duration, num, size, tr
 from .icon import app_icon
@@ -417,7 +417,14 @@ class SettingsDialog(QDialog):
         other = QGroupBox(tr("Other"))
         col = QVBoxLayout(other)
         self.updates = QCheckBox(tr("Check for new versions (once a day, asks GitHub)"))
-        col.addWidget(self.updates)
+        upd_row = QHBoxLayout()
+        upd_row.addWidget(self.updates, 1)
+        self.check_now = QPushButton(tr("Check now"))
+        self.check_now.setToolTip(tr("Installed: {v}", v=__version__))
+        # updating quits DCIMDock: keep what was set here first
+        self.check_now.clicked.connect(lambda: parent.check_update_now(self, before_update=self._accept))
+        upd_row.addWidget(self.check_now)
+        col.addLayout(upd_row)
         lay.addWidget(other)
         beta = QGroupBox(tr("Beta features"))
         col = QVBoxLayout(beta)
@@ -709,6 +716,7 @@ class MainWindow(QMainWindow):
         self.act_verify = menu.addAction(tr("Check the backup…"), self.verify)
         menu.addSeparator()
         menu.addAction(tr("Settings…"), self.show_settings)
+        menu.addAction(tr("Check for updates…"), self.check_update_now)
         fix = menu.addMenu(tr("Troubleshooting"))
         self.act_release = fix.addAction(tr("Release stuck iPhone folders"), self.fix_mounts)
         self.act_release.setVisible(device.HAS_MOUNTS)
@@ -1427,6 +1435,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction(tr("Open DCIMDock"), self.show_window)
         menu.addAction(tr("Open folder"), self.open_dest)
+        menu.addAction(tr("Check for updates…"), self.check_update_now)
         menu.addSeparator()
         quit_act = QAction(tr("Quit"), menu)
         quit_act.triggered.connect(self.quit_all)
@@ -1488,6 +1497,40 @@ class MainWindow(QMainWindow):
                 self._scan()        # read (or forget) the library
             else:
                 self._replan()
+
+    def check_update_now(self, box_parent=None, before_update=None):
+        """Asked for by hand: ask GitHub now, whatever the daily limit, and say what came out."""
+        box_parent = box_parent or self
+        box_parent.setCursor(Qt.WaitCursor)
+
+        def done(res, err):
+            box_parent.unsetCursor()
+            if err or not res or not res[0]:
+                QMessageBox.warning(box_parent, "DCIMDock", tr("Could not ask GitHub: {msg}", msg=_short(str(err)) or "-"))
+                return
+            self.settings.setValue("update_checked", time.time())
+            v, page = res
+            if not update.newer(v):
+                QMessageBox.information(box_parent, "DCIMDock", tr("You have the newest version ({v}).", v=__version__))
+                return
+            self.settings.setValue("update_seen", v)
+            self._show_update((v, page))
+            itself = update.can_update_itself()
+            box = QMessageBox(QMessageBox.Information, "DCIMDock",
+                              tr("Version {v} is available", v=v) + "\n" + tr("Installed: {v}", v=__version__),
+                              QMessageBox.NoButton, box_parent)
+            go = box.addButton(tr("Update now") if itself else tr("Open download page"), QMessageBox.AcceptRole)
+            box.addButton(tr("Later"), QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is not go:
+                return
+            if not itself:
+                QDesktopServices.openUrl(QUrl(page))
+                return
+            if before_update:
+                before_update()         # e.g. the settings dialog saves and closes
+            QTimer.singleShot(0, self.update_itself)
+        self._call(update.latest, done)
 
     def _check_update(self):
         if not self.settings.value("check_updates", True, type=bool):

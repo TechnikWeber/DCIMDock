@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.7] - 2026-11-12
+
+* **Check for updates by hand:** *More → Check for updates…*, the tray
+  menu, or *Check now* in the settings. Asks GitHub at once (not only once
+  a day) and says what came out: newest version, or the new one with
+  *Update now* (Windows `.exe`) or *Open download page*.
+
 ## [0.5.6] - 2026-11-12
 
 * **Settings open at once.** On Windows the first *Settings* froze the

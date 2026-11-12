@@ -199,8 +199,8 @@ your PC*: click *More info* → *Run anyway*. The terminal mode (`--cli`,
 `--verify`) is not part of the `.exe`; from the source it runs with
 `pip install . pymobiledevice3` and `python -m dcimdock --cli`.
 
-**Updating:** DCIMDock shows a notice when a new release is out. Click
-*Update now*: it downloads the new `.exe` next to the old one, checks it
+**Updating:** DCIMDock shows a notice when a new release is out (or ask
+at once: *More → Check for updates…*). Click *Update now*: it downloads the new `.exe` next to the old one, checks it
 against the release's `SHA256SUMS`, starts it and deletes the old file.
 Settings, the list of saved files and the autostart carry over. (Works from
 0.5.5 on and only where DCIMDock may write next to its `.exe`, e.g. in

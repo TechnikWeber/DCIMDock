@@ -187,6 +187,13 @@ DE = {
         "„Apple Geräte“ aus dem Microsoft Store (oder iTunes von apple.com)",
     "Open Microsoft Store": "Microsoft Store öffnen",
     "Update now": "Jetzt aktualisieren",
+    "Check now": "Jetzt prüfen",
+    "Installed: {v}": "Installiert: {v}",
+    "Check for updates…": "Nach Updates suchen …",
+    "Could not ask GitHub: {msg}": "GitHub ließ sich nicht fragen: {msg}",
+    "You have the newest version ({v}).": "Du hast die neueste Version ({v}).",
+    "Open download page": "Download-Seite öffnen",
+    "Later": "Später",
     "Checking the HEIC converter…": "Prüfe HEIC-Konverter …",
     "Downloads the new version, checks it and restarts DCIMDock.":
         "Lädt die neue Version herunter, prüft sie und startet DCIMDock neu.",
