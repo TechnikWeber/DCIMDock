@@ -1,15 +1,17 @@
 """The main window: device status, destination, progress bar, optional preview."""
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, QSize, QStandardPaths, Qt, QThread, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import (QDate, QDir, QObject, QRunnable, QSettings, QSize, QStandardPaths, Qt, QThread,
+                            QThreadPool, QTimer, QUrl, Signal)
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QImageReader, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame, QHBoxLayout,
-    QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
+    QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QSizePolicy, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -147,6 +149,179 @@ class IntroDialog(QDialog):
         lay.addWidget(buttons)
 
 
+PRESET_LABELS = [
+    ("all", "Any date"),
+    ("7d", "Last 7 days"),
+    ("30d", "Last 30 days"),
+    ("90d", "Last 90 days"),
+    ("year", "This year"),
+    ("lastyear", "Last year"),
+    ("custom", "From … to …"),
+]
+
+
+def _qdate_time(d: QDate) -> float:
+    return time.mktime((d.year(), d.month(), d.day(), 12, 0, 0, 0, 0, -1))
+
+
+class SelectionChoice:
+    """What the selection dialog stores: a preset plus the custom days, so
+    "last 30 days" stays relative to today."""
+
+    KINDS = ("photos", "videos", "screenshots", "live", "edits")
+
+    def __init__(self, settings: QSettings | None = None):
+        self.preset = "all"
+        today = QDate.currentDate()
+        self.first = today.addMonths(-1)
+        self.last = today
+        self.flags = {k: True for k in self.KINDS}
+        if settings is not None:
+            self.preset = settings.value("sel_preset", "all")
+            if self.preset not in sync.PRESETS:
+                self.preset = "all"
+            for attr, key in (("first", "sel_from"), ("last", "sel_to")):
+                d = QDate.fromString(str(settings.value(key, "")), Qt.ISODate)
+                if d.isValid():
+                    setattr(self, attr, d)
+            for k in self.KINDS:
+                self.flags[k] = settings.value(f"sel_{k}", True, type=bool)
+
+    def save(self, settings: QSettings):
+        settings.setValue("sel_preset", self.preset)
+        settings.setValue("sel_from", self.first.toString(Qt.ISODate))
+        settings.setValue("sel_to", self.last.toString(Qt.ISODate))
+        for k in self.KINDS:
+            settings.setValue(f"sel_{k}", self.flags[k])
+
+    def selection(self) -> sync.Selection:
+        a, b = sync.date_range(self.preset, custom=(_qdate_time(self.first), _qdate_time(self.last)))
+        return sync.Selection(a, b, **self.flags)
+
+    def describe(self) -> str:
+        sel = self.selection()
+        if not sel.active:
+            return tr("Everything")
+        bits = []
+        if self.preset == "custom":
+            bits.append(f"{date(_qdate_time(self.first))} – {date(_qdate_time(self.last))}")
+        elif self.preset != "all":
+            bits.append(tr(dict(PRESET_LABELS)[self.preset]))
+        kinds = [tr(n) for k, n in (("photos", "Photos"), ("videos", "Videos"), ("screenshots", "Screenshots"))
+                 if self.flags[k]]
+        if len(kinds) < 3:
+            bits.append(tr("only {what}", what=", ".join(kinds)))
+        if not self.flags["live"]:
+            bits.append(tr("without Live Photo videos"))
+        if not self.flags["edits"]:
+            bits.append(tr("without edits"))
+        return " · ".join(bits)
+
+    def folder_label(self) -> str:
+        """Part of the folder name for "copy the selection into a new folder"."""
+        a, b = self.selection().date_from, self.selection().date_to
+        if a is None and b is None:
+            return ""
+        fa = time.strftime("%Y-%m-%d", time.localtime(a)) if a is not None else "…"
+        fb = time.strftime("%Y-%m-%d", time.localtime(b - 1)) if b is not None else "…"
+        return f"{fa} {tr('to')} {fb}"
+
+
+class SelectionDialog(QDialog):
+    def __init__(self, parent, choice: SelectionChoice, capture_date: bool):
+        super().__init__(parent)
+        self.setWindowTitle(tr("What to copy"))
+        lay = QVBoxLayout(self)
+
+        when = QGroupBox(tr("Date"))
+        form = QFormLayout(when)
+        self.preset = QComboBox()
+        for key, label in PRESET_LABELS:
+            self.preset.addItem(tr(label), key)
+        self.preset.setCurrentIndex(max(0, self.preset.findData(choice.preset)))
+        form.addRow(tr("Period") + ":", self.preset)
+        self.first = QDateEdit(choice.first)
+        self.last = QDateEdit(choice.last)
+        for w in (self.first, self.last):
+            w.setCalendarPopup(True)
+            w.setMaximumDate(QDate.currentDate().addYears(1))
+        days = QHBoxLayout()
+        days.addWidget(self.first)
+        days.addWidget(QLabel(tr("to")))
+        days.addWidget(self.last)
+        days.addStretch(1)
+        form.addRow(tr("From") + ":", days)
+        basis = QLabel(tr("Uses the date the photo was taken (EXIF), else the file date.") if capture_date
+                       else tr("Uses the file date (“Sort by the date the photo was taken” is off)."))
+        basis.setWordWrap(True)
+        basis.setStyleSheet("color: palette(placeholder-text);")
+        form.addRow(basis)
+        lay.addWidget(when)
+
+        what = QGroupBox(tr("Kinds"))
+        col = QVBoxLayout(what)
+        self.boxes = {}
+        for key, label, tip in (
+            ("photos", "Photos", "Pictures from the camera and saved pictures."),
+            ("videos", "Videos", "Videos of their own. The short video of a Live Photo is set below."),
+            ("screenshots", "Screenshots", "Recognised by the “Screenshot” mark iOS writes into them."),
+            ("live", "Live Photo videos (.MOV next to the photo)", "Off: only the still image of a Live Photo."),
+            ("edits", "Edits (IMG_E… and .AAE files)", "The edited version and the file with the edit steps. The original is always copied."),
+        ):
+            b = QCheckBox(tr(label))
+            b.setToolTip(tr(tip))
+            b.setChecked(choice.flags[key])
+            col.addWidget(b)
+            self.boxes[key] = b
+        lay.addWidget(what)
+
+        note = QLabel(tr("Files that are already saved are never copied again. What is left out stays on the iPhone and can be copied later."))
+        note.setWordWrap(True)
+        lay.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.Reset)
+        buttons.button(QDialogButtonBox.Reset).setText(tr("Everything"))
+        buttons.button(QDialogButtonBox.Cancel).setText(tr("Cancel"))
+        buttons.button(QDialogButtonBox.Reset).clicked.connect(self._reset)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        self.buttons = buttons
+        lay.addWidget(buttons)
+
+        self.preset.currentIndexChanged.connect(self._update)
+        for b in self.boxes.values():
+            b.toggled.connect(self._update)
+        self.first.dateChanged.connect(self._update)
+        self.last.dateChanged.connect(self._update)
+        self._update()
+
+    def _reset(self):
+        self.preset.setCurrentIndex(0)
+        for b in self.boxes.values():
+            b.setChecked(True)
+
+    def _update(self, *_):
+        custom = self.preset.currentData() == "custom"
+        self.first.setEnabled(custom)
+        self.last.setEnabled(custom)
+        kinds = any(self.boxes[k].isChecked() for k in ("photos", "videos", "screenshots"))
+        order = not custom or self.first.date() <= self.last.date()
+        self.boxes["live"].setEnabled(self.boxes["photos"].isChecked() or self.boxes["screenshots"].isChecked())
+        self.boxes["edits"].setEnabled(kinds)
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(kinds and order)
+
+    def _accept(self):
+        self.choice = SelectionChoice()
+        self.choice.preset = self.preset.currentData()
+        self.choice.first, self.choice.last = self.first.date(), self.last.date()
+        self.choice.flags = {k: b.isChecked() for k, b in self.boxes.items()}
+        self.accept()
+
+
+def native(path: str) -> str:
+    return QDir.toNativeSeparators(path)
+
+
 def default_dest() -> str:
     pics = QStandardPaths.writableLocation(QStandardPaths.PicturesLocation) or str(Path.home())
     return str(Path(pics) / "iPhone")
@@ -279,6 +454,16 @@ class MainWindow(QMainWindow):
         opt_row2.addWidget(self.shots_box)
         opt_row2.addStretch(1)
         lay.addLayout(opt_row2)
+        sel_row = QHBoxLayout()
+        sel_row.addWidget(QLabel(tr("Copy") + ":"))
+        self.sel_label = QLabel()
+        self.sel_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        sel_row.addWidget(self.sel_label, 1)
+        self.sel_btn = QPushButton(tr("Choose…"))
+        self.sel_btn.setToolTip(tr("Only a period, only photos or videos, without Live Photo videos or edits."))
+        self.sel_btn.clicked.connect(self.choose_selection)
+        sel_row.addWidget(self.sel_btn)
+        lay.addLayout(sel_row)
         self.example = QLabel()
         self.example.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.example.setStyleSheet("color: palette(placeholder-text);")
@@ -294,6 +479,8 @@ class MainWindow(QMainWindow):
         self.capture_box.setChecked(s.value("capture_date", True, type=bool))
         self.shots_box.setChecked(s.value("screenshots", False, type=bool))
         self.preview_box.setChecked(s.value("preview", True, type=bool))
+        self.choice = SelectionChoice(s)
+        self._show_selection()
         self._show_dest()
         self._show_example()
         self.layout_box.currentIndexChanged.connect(self._options_changed)
@@ -339,6 +526,7 @@ class MainWindow(QMainWindow):
         self.more_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         menu = QMenu(self.more_btn)
         self.act_full = menu.addAction(tr("Copy everything again (new folder)…"), self.full_copy)
+        self.act_full.setToolTip(tr("Uses the selection, if one is set."))
         self.act_verify = menu.addAction(tr("Check the backup…"), self.verify)
         menu.addSeparator()
         fix = menu.addMenu(tr("Troubleshooting"))
@@ -383,18 +571,18 @@ class MainWindow(QMainWindow):
         self.go_btn.setEnabled(state == "copying" or (state == "ready" and bool(self.plan and self.plan.tasks)))
         self.go_btn.setText(tr("Stop") if state == "copying" else tr("Back up"))
         for w in (self.dest_btn, self.layout_box, self.per_device, self.split, self.more_btn,
-                  self.capture_box, self.shots_box, self.device_box):
+                  self.capture_box, self.shots_box, self.device_box, self.sel_btn):
             w.setEnabled(not busy)
         self.act_full.setEnabled(state == "ready" and bool(self.entries))
         if not busy:
-            self.capture_box.setEnabled(self.layout_box.currentData() not in ("dcim", "flat"))
+            self.capture_box.setEnabled(self._dates_matter())
         has_dev = bool(self.dev) and not self.source
         self.act_repair.setEnabled(has_dev)
         self.retry_btn.setVisible(state in ("missing", "error"))
 
     def _show_dest(self):
-        self.dest_label.setText(self.dest)
-        self.dest_label.setToolTip(self.dest)
+        self.dest_label.setText(native(self.dest))
+        self.dest_label.setToolTip(native(self.dest))
 
     def _options(self) -> sync.Options:
         folder = ""
@@ -403,13 +591,35 @@ class MainWindow(QMainWindow):
         photos, videos = (tr("Photos"), tr("Videos")) if self.split.isChecked() else ("", "")
         shots = tr("Screenshots") if self.shots_box.isChecked() else ""
         return sync.Options(self.layout_box.currentData(), folder, photos, videos, shots,
-                            self.capture_box.isChecked())
+                            self.capture_box.isChecked(), self.choice.selection())
+
+    def _dates_matter(self) -> bool:
+        sel = self.choice.selection()
+        return self.layout_box.currentData() not in ("dcim", "flat") or sel.date_from is not None or sel.date_to is not None
+
+    def _show_selection(self):
+        text = self.choice.describe()
+        active = self.choice.selection().active
+        self.sel_label.setText(f"<b>{text}</b>" if active else text)
+        self.sel_label.setToolTip(text)
+
+    def choose_selection(self):
+        if self.worker:
+            return
+        dlg = SelectionDialog(self, self.choice, self.capture_box.isChecked())
+        if dlg.exec() == QDialog.Accepted:
+            self.choice = dlg.choice
+            self.choice.save(self.settings)
+            self._show_selection()
+            if not self.worker:
+                self.capture_box.setEnabled(self._dates_matter())
+            self._replan()
 
     def _show_example(self):
         o = self._options()
         t = time.mktime((2026, 11, 3, 14, 0, 0, 0, 0, -1))
         parts = [o.device_folder, o.photo_dir or o.screenshot_dir and "", sync.layout_dir(o.layout, t, "100APPLE"), "IMG_0001.HEIC"]
-        self.example.setText(tr("Example") + ": " + "/".join(p for p in parts if p))
+        self.example.setText(tr("Example") + ": " + os.sep.join(p.replace("/", os.sep) for p in parts if p))
 
     # ------------------------------------------------------------ start / polling
     def start(self):
@@ -622,11 +832,15 @@ class MainWindow(QMainWindow):
         known = p.known + len(p.adopted)
         if not self.entries:
             text = tr("No photos on the iPhone.")
+        elif not p.tasks and p.skipped:
+            text = tr("Nothing new in the selection · {k} already saved", k=num(known))
         elif not p.tasks:
             text = tr("Everything is saved ({k} files).", k=num(known))
         else:
             text = tr("{n} new files ({size}) · {k} already saved" if len(p.tasks) != 1 else "1 new file ({size}) · {k} already saved",
                       n=num(len(p.tasks)), size=size(p.bytes), k=num(known))
+        if p.skipped:
+            text += " · " + tr("{n} not selected", n=num(p.skipped))
         self.summary.setText(f"<b>{text}</b>")
         if p.tasks:
             ok, free = sync.free_space_ok(Path(self.dest), p.bytes)
@@ -750,6 +964,10 @@ class MainWindow(QMainWindow):
             if a is not None:
                 parts.append(tr("From this iPhone, {k} files taken between {a} and {b} are safe on this computer.",
                                 k=num(k), a=date(a), b=date(b)))
+            left = sync.unsaved(self.entries, self._copy_index)
+            if left and not res.cancelled:
+                parts.append(tr("{n} files on the iPhone are not in this backup (not selected or not readable).",
+                                n=num(left)))
         if not self.source:
             parts.append(tr("DCIMDock does not delete anything on the iPhone. To free up space, delete the photos in the Photos app and empty “Recently Deleted”. With iCloud Photos turned on, this deletes them from iCloud and all your devices too."))
         box = QMessageBox(QMessageBox.Warning if (res.failed or res.cancelled) else QMessageBox.Information,
@@ -767,7 +985,12 @@ class MainWindow(QMainWindow):
         if not self.entries or not self.dev:
             return
         stamp = time.strftime("%Y-%m-%d %H-%M")
-        root = Path(self.dest) / f"{tr('Full copy')} {stamp}"
+        if self.choice.selection().active:
+            label = self.choice.folder_label()
+            name = f"{tr('Selection')} {label} ({stamp})" if label else f"{tr('Selection')} {stamp}"
+        else:
+            name = f"{tr('Full copy')} {stamp}"
+        root = Path(self.dest) / sync.safe_name(name)
         udid, opts = self.dev.udid, self._options()
         self._set_state("scanning", tr("Reading the photo list…"))
         self._call(lambda: self._plan_blocking(root, udid, opts), self._full_planned)
@@ -782,7 +1005,9 @@ class MainWindow(QMainWindow):
         root = index.root
         ok, free = sync.free_space_ok(Path(self.dest), plan.bytes)
         text = tr("Copies all {n} files ({size}) from the iPhone into a new folder, without comparing with earlier backups:\n\n{folder}\n\nThe normal backup is not touched.",
-                  n=num(len(plan.tasks)), size=size(plan.bytes), folder=root)
+                  n=num(len(plan.tasks)), size=size(plan.bytes), folder=native(str(root)))
+        if self.choice.selection().active:
+            text += "\n\n" + tr("Selection: {what}", what=self.choice.describe())
         if not ok:
             QMessageBox.warning(self, tr("Copy everything again"), text + "\n\n" + tr(
                 "Only {free} free in the backup folder, {need} needed.",

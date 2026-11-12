@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0] - 2026-11-12
+
+* **Choose what to copy:** a period (last 7/30/90 days, this year, last
+  year, from … to …) by capture date or file date; photos, videos and
+  screenshots each on or off; with or without Live Photo videos and edits
+  (`IMG_E…`, `.AAE`). Decided per group, so a Live Photo stays together.
+  The window shows how many files are not selected, and the report at the
+  end how many are not in the backup yet.
+* *Copy everything again* takes the selection into account and names the
+  new folder after it.
+* Terminal mode: `--period`, `--from`, `--to`, `--only`, `--no-live`,
+  `--no-edits`.
+* Paths in the window use the system's separator (`\` on Windows).
+
 ## [0.2.0] - 2026-11-12
 
 * **Windows.** `DCIMDock-0.2.0-windows-x64.exe`, one file without installer.

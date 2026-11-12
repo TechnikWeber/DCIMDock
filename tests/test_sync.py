@@ -265,3 +265,85 @@ class TestNames(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSelection(Fake):
+    def plan(self, sel, capture=False, layout="flat"):
+        entries = sync.scan(self.dcim)
+        index = sync.Index(self.dest, "UDID")
+        opts = sync.Options(layout, "", capture_date=capture, selection=sel)
+        meta = sync.read_meta(self.dcim, sync.needs_meta(entries, index, opts), {})
+        return sync.make_plan(entries, index, opts, meta), index
+
+    def names(self, plan):
+        return sorted(t.entry.name for t in plan.tasks)
+
+    def test_default_is_everything(self):
+        self.assertFalse(sync.Selection().active)
+        self.put("100APPLE/IMG_0001.HEIC", b"a")
+        plan, _ = self.plan(sync.Selection())
+        self.assertEqual((len(plan.tasks), plan.skipped), (1, 0))
+
+    def test_date_range_by_file_date(self):
+        self.put("100APPLE/IMG_0001.JPG", b"a", OCT_END)
+        self.put("100APPLE/IMG_0002.JPG", b"b", NOV)
+        a = sync.date_range("custom", custom=(NOV, NOV))
+        plan, _ = self.plan(sync.Selection(*a))
+        self.assertEqual(self.names(plan), ["IMG_0002.JPG"])
+        self.assertEqual(plan.skipped, 1)
+
+    def test_live_photo_stays_together_in_range(self):
+        # the .MOV is a second older than the day: the group's date decides
+        self.put("100APPLE/IMG_0001.HEIC", b"a", NOV)
+        self.put("100APPLE/IMG_0001.MOV", b"m", OCT_END)
+        a, b = sync.date_range("custom", custom=(OCT_END, OCT_END))
+        plan, _ = self.plan(sync.Selection(a, b))
+        self.assertEqual(self.names(plan), ["IMG_0001.HEIC", "IMG_0001.MOV"])
+
+    def test_kinds(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"a")
+        self.put("100APPLE/IMG_0001.MOV", b"live")
+        self.put("100APPLE/IMG_0002.MOV", b"video")
+        (self.dcim / "100APPLE/IMG_0003.PNG").write_bytes((DATA / "screenshot.png").read_bytes())
+        (self.dcim / "100APPLE/IMG_0004.PNG").write_bytes((DATA / "plain.png").read_bytes())
+        plan, _ = self.plan(sync.Selection(photos=False, screenshots=False))
+        self.assertEqual(self.names(plan), ["IMG_0002.MOV"])
+        plan, _ = self.plan(sync.Selection(videos=False))
+        self.assertEqual(self.names(plan), ["IMG_0001.HEIC", "IMG_0001.MOV", "IMG_0003.PNG", "IMG_0004.PNG"])
+        plan, _ = self.plan(sync.Selection(screenshots=False, videos=False, live=False))
+        self.assertEqual(self.names(plan), ["IMG_0001.HEIC", "IMG_0004.PNG"])
+        plan, _ = self.plan(sync.Selection(photos=False, videos=False))
+        self.assertEqual(self.names(plan), ["IMG_0003.PNG"])
+
+    def test_without_edits(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"a")
+        self.put("100APPLE/IMG_E0001.HEIC", b"e")
+        self.put("100APPLE/IMG_O0001.AAE", b"x")
+        plan, _ = self.plan(sync.Selection(edits=False))
+        self.assertEqual(self.names(plan), ["IMG_0001.HEIC"])
+
+    def test_later_run_without_selection_fills_the_gap(self):
+        self.put("100APPLE/IMG_0001.HEIC", b"a")
+        self.put("100APPLE/IMG_0001.MOV", b"m")
+        plan, index = self.plan(sync.Selection(live=False), layout="ym")
+        sync.run(plan, self.dcim, index)
+        self.assertEqual(sync.unsaved(sync.scan(self.dcim), index), 1)
+        plan, index = self.plan(sync.Selection(), layout="ym")
+        self.assertEqual([t.dest for t in plan.tasks], ["2026/2026-11/IMG_0001.MOV"])
+        sync.run(plan, self.dcim, index)
+        self.assertEqual(sync.unsaved(sync.scan(self.dcim), index), 0)
+
+    def test_presets(self):
+        now = time.mktime((2026, 1, 3, 15, 0, 0, 0, 0, -1))
+        day = lambda y, m, d: time.mktime((y, m, d, 0, 0, 0, 0, 0, -1))  # noqa: E731
+        self.assertEqual(sync.date_range("all", now), (None, None))
+        self.assertEqual(sync.date_range("7d", now), (day(2025, 12, 28), day(2026, 1, 4)))
+        self.assertEqual(sync.date_range("year", now), (day(2026, 1, 1), day(2026, 1, 4)))
+        self.assertEqual(sync.date_range("lastyear", now), (day(2025, 1, 1), day(2026, 1, 1)))
+        self.assertEqual(sync.date_range("custom", now, (None, now)), (None, day(2026, 1, 4)))
+
+    def test_is_edit(self):
+        self.assertTrue(sync.is_edit("IMG_E0001.HEIC"))
+        self.assertTrue(sync.is_edit("IMG_0001.AAE"))
+        self.assertFalse(sync.is_edit("IMG_0001.HEIC"))
+        self.assertFalse(sync.is_edit("IMG_EDIT.JPG"))

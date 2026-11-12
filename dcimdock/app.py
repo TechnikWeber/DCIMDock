@@ -44,6 +44,37 @@ def _default_dest() -> Path:
     return Path(pics or Path.home() / "Pictures") / "iPhone"
 
 
+from .sync import PRESETS  # noqa: E402
+
+KINDS = ("photos", "videos", "screenshots")
+
+
+def _day(text: str) -> float:
+    try:
+        return time.mktime(time.strptime(text, "%Y-%m-%d"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a date (YYYY-MM-DD): {text}") from None
+
+
+def _kinds(text: str) -> set[str]:
+    kinds = {k.strip().lower() for k in text.split(",") if k.strip()}
+    bad = kinds - set(KINDS)
+    if bad or not kinds:
+        raise argparse.ArgumentTypeError(f"kinds are {', '.join(KINDS)}")
+    return kinds
+
+
+def selection_from(args):
+    from . import sync
+    if args.date_from is not None or args.date_to is not None:
+        a, b = sync.date_range("custom", custom=(args.date_from, args.date_to))
+    else:
+        a, b = sync.date_range(args.period)
+    kinds = args.only or set(KINDS)
+    return sync.Selection(a, b, "photos" in kinds, "videos" in kinds, "screenshots" in kinds,
+                          not args.no_live, not args.no_edits)
+
+
 def cli(args) -> int:
     from . import sync
     from .backend import device
@@ -84,13 +115,16 @@ def cli(args) -> int:
     try:
         root = Path(args.dest).expanduser().resolve() if args.dest else _default_dest()
         if args.full:
-            root = root / f"{tr('Full copy')} {time.strftime('%Y-%m-%d %H-%M')}"
+            stamp = time.strftime('%Y-%m-%d %H-%M')
+            name = f"{tr('Selection')} {stamp}" if selection_from(args).active else f"{tr('Full copy')} {stamp}"
+            root = root / name
         print(tr("Reading the photo list…"))
         entries = sync.scan(dcim)
         index = sync.Index(root, dev.udid)
         split = (tr("Photos"), tr("Videos")) if args.split else ("", "")
         opts = sync.Options(args.layout, "" if args.no_device_folder else sync.safe_name(dev.label), *split,
-                            tr("Screenshots") if args.screenshots else "", not args.file_date)
+                            tr("Screenshots") if args.screenshots else "", not args.file_date,
+                            selection_from(args))
         need = sync.needs_meta(entries, index, opts)
         meta = None
         if need:
@@ -102,8 +136,11 @@ def cli(args) -> int:
                 print()
         plan = sync.make_plan(entries, index, opts, meta)
         known = plan.known + len(plan.adopted)
+        if plan.skipped:
+            print(tr("{n} not selected", n=num(plan.skipped)))
         if not plan.tasks:
-            print(tr("Everything is saved ({k} files).", k=num(known)))
+            print(tr("Nothing new in the selection · {k} already saved", k=num(known)) if plan.skipped
+                  else tr("Everything is saved ({k} files).", k=num(known)))
             if plan.adopted:
                 index.save()   # remember files that were found already copied
             return 0
@@ -201,6 +238,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="no subfolder named after the iPhone")
     parser.add_argument("--dry-run", action="store_true", help="only show what would be copied")
     parser.add_argument("--source", help="copy from this folder instead of an iPhone (for tests)")
+    sel = parser.add_argument_group("selection (default: everything)")
+    sel.add_argument("--period", choices=[p for p in PRESETS if p != "custom"], default="all",
+                     help="7d/30d/90d: the last days including today, year: this year, lastyear: the previous one")
+    sel.add_argument("--from", dest="date_from", type=_day, metavar="YYYY-MM-DD", help="first day to copy")
+    sel.add_argument("--to", dest="date_to", type=_day, metavar="YYYY-MM-DD", help="last day to copy (included)")
+    sel.add_argument("--only", type=_kinds, metavar="KINDS",
+                     help="comma separated: photos, videos, screenshots")
+    sel.add_argument("--no-live", action="store_true", help="without the video of Live Photos")
+    sel.add_argument("--no-edits", action="store_true", help="without edited versions (IMG_E…) and .AAE files")
     parser.add_argument("--selftest", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 

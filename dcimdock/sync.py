@@ -14,6 +14,7 @@ Rules this module guarantees:
 """
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import os
@@ -69,6 +70,8 @@ class Plan:
     adopted: list[Task] = field(default_factory=list)  # already there, only indexed
     known: int = 0
     known_bytes: int = 0
+    skipped: int = 0         # new on the iPhone, but not in the selection
+    skipped_bytes: int = 0
 
     @property
     def bytes(self) -> int:
@@ -88,6 +91,79 @@ LAYOUTS = ("ym", "ymd", "y", "m", "dcim", "flat")
 
 
 @dataclass
+class Selection:
+    """What to copy. The default (everything) is what DCIMDock always did.
+
+    Decisions are made per group (photo + Live Photo video + edits), so a
+    Live Photo is never torn apart by the date range. The date is the group's
+    capture date when Options.capture_date is on, else its file date.
+    """
+    date_from: Optional[float] = None   # local time, inclusive
+    date_to: Optional[float] = None     # local time, exclusive
+    photos: bool = True
+    videos: bool = True                 # videos of their own; Live Photo videos see live
+    screenshots: bool = True
+    live: bool = True                   # the .MOV of a Live Photo
+    edits: bool = True                  # IMG_E… (edited version) and .AAE (edit steps)
+
+    @property
+    def active(self) -> bool:
+        return self != Selection()
+
+    @property
+    def needs_kind_meta(self) -> bool:
+        """Telling screenshots from photos needs the iOS mark inside the PNG."""
+        return self.screenshots != self.photos
+
+    def wants_kind(self, kind: str) -> bool:
+        return {"image": self.photos, "video": self.videos, "screenshot": self.screenshots}.get(kind, True)
+
+    def wants_time(self, t: float) -> bool:
+        if self.date_from is not None and t < self.date_from:
+            return False
+        if self.date_to is not None and t >= self.date_to:
+            return False
+        return True
+
+
+def _day(d: _dt.date) -> float:
+    """Local midnight at the start of day d."""
+    return time.mktime((d.year, d.month, d.day, 0, 0, 0, 0, 0, -1))
+
+
+PRESETS = ("all", "7d", "30d", "90d", "year", "lastyear", "custom")
+
+
+def date_range(preset: str, now: Optional[float] = None,
+               custom: tuple[Optional[float], Optional[float]] = (None, None)) -> tuple[Optional[float], Optional[float]]:
+    """A preset -> (from, to) in local time, `to` exclusive.
+
+    7d/30d/90d include today; year is this year up to today; lastyear the
+    whole previous year. custom: (first day, last day), both inclusive, given
+    as any time on those days; None leaves that side open."""
+    today = _dt.date.fromtimestamp(time.time() if now is None else now)
+    tomorrow = _day(today + _dt.timedelta(days=1))
+    if preset in ("7d", "30d", "90d"):
+        return _day(today - _dt.timedelta(days=int(preset[:-1]) - 1)), tomorrow
+    if preset == "year":
+        return _day(today.replace(month=1, day=1)), tomorrow
+    if preset == "lastyear":
+        return _day(_dt.date(today.year - 1, 1, 1)), _day(_dt.date(today.year, 1, 1))
+    if preset == "custom":
+        a, b = custom
+        start = _day(_dt.date.fromtimestamp(a)) if a is not None else None
+        end = _day(_dt.date.fromtimestamp(b) + _dt.timedelta(days=1)) if b is not None else None
+        return start, end
+    return None, None
+
+
+def is_edit(name: str) -> bool:
+    """IMG_E0042.HEIC (edited copy), IMG_O0042.AAE and IMG_0042.AAE (edit steps)."""
+    stem, ext = os.path.splitext(name)
+    return ext.lower() == ".aae" or bool(_EDIT_PREFIX.match(stem))
+
+
+@dataclass
 class Options:
     layout: str = "ym"         # see layout_dir()
     device_folder: str = ""    # subfolder per iPhone, "" for none
@@ -95,6 +171,7 @@ class Options:
     video_dir: str = ""        # folders; both "" for no split
     screenshot_dir: str = ""   # screenshots into their own folder, "" for no
     capture_date: bool = True  # folders by EXIF capture date instead of file date
+    selection: Selection = field(default_factory=Selection)
 
 
 def is_media(name: str) -> str:
@@ -262,8 +339,10 @@ def _same_file(p: Path, e: Entry) -> Optional[bool]:
 
 def needs_meta(entries: list[Entry], index: Index, opts: Options) -> list[Entry]:
     """Only new files have to be looked into, and only if an option needs it."""
-    dates = opts.capture_date and opts.layout not in ("dcim", "flat")
-    shots = bool(opts.screenshot_dir)
+    sel = opts.selection
+    ranged = sel.date_from is not None or sel.date_to is not None
+    dates = opts.capture_date and (opts.layout not in ("dcim", "flat") or ranged)
+    shots = bool(opts.screenshot_dir) or sel.needs_kind_meta
     if not (dates or shots):
         return []
     out = []
@@ -324,6 +403,23 @@ def make_plan(entries: list[Entry], index: Index, opts: Options, meta: Optional[
                 new.append(e)
         if not new:
             continue
+
+        sel = opts.selection
+        if sel.active:
+            kind = group_kind(members, meta)
+            if not (sel.wants_kind(kind) and sel.wants_time(group_time(members, meta, opts.capture_date))):
+                keep = []
+            else:
+                keep = [e for e in new
+                        if (sel.edits or not is_edit(e.name))
+                        and (sel.live or kind == "video" or is_media(e.name) != "video")]
+            for e in new:
+                if e not in keep:
+                    plan.skipped += 1
+                    plan.skipped_bytes += e.size
+            new = keep
+            if not new:
+                continue
 
         start = 0
         if prev_dest and prev_entry:
@@ -508,6 +604,11 @@ def verify(index: Index, progress: Callable[[int, int], None] = lambda i, n: Non
         else:
             res.ok += 1
     return res
+
+
+def unsaved(entries: list[Entry], index: Index) -> int:
+    """Files on the iPhone that are not in this backup (e.g. outside the selection)."""
+    return sum(1 for e in entries if not index.known(e))
 
 
 def saved_range(entries: list[Entry], index: Index) -> tuple[Optional[float], Optional[float], int]:

@@ -1,5 +1,5 @@
 Name:           dcimdock
-Version:        0.2.0
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Copy the photos and videos from an iPhone to this computer
 License:        MIT
@@ -53,6 +53,9 @@ install -Dm644 share/io.github.technikweber.dcimdock.metainfo.xml \
 %{_metainfodir}/io.github.technikweber.dcimdock.metainfo.xml
 
 %changelog
+* Thu Nov 12 2026 Philipp Weber - 0.3.0-1
+- Choose what to copy: period, kinds, Live Photo videos, edits
+
 * Thu Nov 12 2026 Philipp Weber - 0.2.0-1
 - Windows build (no change on Linux)
 

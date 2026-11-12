@@ -60,6 +60,14 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
   lands in its own year, not in the month you saved it. Only new files are
   looked into, and it can be switched off to use the file date.
 * **Several iPhones** at once: a list in the title picks the one to back up.
+* **Choose what to copy** (*Copy: Choose…*): a period (last 7, 30 or 90
+  days, this year, last year, or from one day to another, by capture date or
+  file date), only photos, videos or screenshots, with or without the video
+  of Live Photos and the edits (`IMG_E…`, `.AAE`). A Live Photo is never torn
+  apart by the date. What is left out stays on the iPhone, is counted as
+  *not selected* and is copied on a later run without the selection.
+  *Copy everything again* uses the selection too and names the new folder
+  after it (`Selection 2025-01-01 to 2025-12-31 (2026-11-12 18-00)`).
 * Checks the free space before it starts.
 * Progress bar with speed and time left. The **preview** of the photo just
   copied is decoded at reduced size in its own thread, at most about twice a
@@ -87,7 +95,8 @@ photos on the iPhone it may start again at `100APPLE/IMG_0001`. Then
 * If the iPhone was mounted while locked (an empty pseudo folder without
   `DCIM`), DCIMDock unmounts it and asks you to unlock.
 * Terminal mode for scripts:
-  `dcimdock --cli [--dest DIR] [--layout ym|ymd|m|y|dcim|flat] [--split] [--screenshots] [--file-date] [--full] [--dry-run]`,
+  `dcimdock --cli [--dest DIR] [--layout ym|ymd|m|y|dcim|flat] [--split] [--screenshots] [--file-date] [--full] [--dry-run]`
+  with the selection `[--period 7d|30d|90d|year|lastyear] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--only photos,videos,screenshots] [--no-live] [--no-edits]`,
   and `dcimdock --verify --dest DIR` to check a backup.
 * English or German, following the system language.
 
